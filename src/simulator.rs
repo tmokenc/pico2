@@ -9,7 +9,7 @@ pub struct Simulator {
     processor: Rp2350,
     sio: Sio,
     rom: Memory<{ 32 * KB }, 1, 1>,
-    sram: Memory<{ 512 * KB }, 1, 1>,
+    sram: Memory<{ 520 * KB }, 1, 1>,
     cache_line: Memory<{ 16 * KB }, 1, 1>,
     boot_ram: Memory<{ 1 * KB }, 3, 4>,
 }
