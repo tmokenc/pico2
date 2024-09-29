@@ -2,7 +2,10 @@
 Raspberry Pi Pico 2 simulator in Rust. Currently WIP.
 
 ## Literature
+- [Raspberry Pi Pico 2 Datasheet](https://datasheets.raspberrypi.com/pico/pico-2-datasheet.pdf)
 - [RP2350 Datasheet](https://datasheets.raspberrypi.com/rp2350/rp2350-datasheet.pdf) - The CPU of Raspberry Pi Pico 2
+- [pico-sdk](https://github.com/raspberrypi/pico-sdk) - Source code of the SDK for Raspberry Pi Pico
+    - [/src/rp2350](https://github.com/raspberrypi/pico-sdk/tree/master/src/rp2350) - Part specific to the Raspberry Pi Pico 2
 
 ### RISC-V Hazard3
 [Hazard3 documentation](https://github.com/Wren6991/Hazard3/blob/v1.0-rc1/doc/hazard3.pdf)
