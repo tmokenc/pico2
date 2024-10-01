@@ -1,7 +1,5 @@
-[package]
-name = "pico2"
-version = "0.1.0"
-edition = "2021"
-author = "Nguyen Le Duy"
+[workspace]
+members = ["pico2", "circuit_board", "web"]
+resolver = "2"
 
-[dependencies]
+[workspace.dependencies]
