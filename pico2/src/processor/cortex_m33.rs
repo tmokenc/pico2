@@ -1,4 +1,5 @@
 use super::CpuArchitecture;
+use super::Stats;
 
 #[derive(Default)]
 pub struct CortexM33 {
@@ -14,7 +15,11 @@ impl CpuArchitecture for CortexM33 {
         todo!()
     }
 
-    fn exec(&mut self) {
+    fn tick(&mut self) {
+        todo!()
+    }
+
+    fn stats(&self) -> &Stats {
         todo!()
     }
 }
