@@ -1,11 +1,13 @@
 mod exec;
 pub mod instruction;
+pub(crate) mod instruction_format;
 pub(crate) mod registers;
 pub(crate) mod trap;
 
 use super::CpuArchitecture;
 use super::Stats;
 pub use instruction::*;
+pub use instruction_format::*;
 pub use registers::*;
 pub use trap::*;
 
