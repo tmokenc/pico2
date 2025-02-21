@@ -1,4 +1,4 @@
-pub(super) type Register = u32;
+pub(super) type Register = u8;
 
 pub(super) trait RegisterValue {
     fn as_u32(&self) -> u32;
@@ -31,24 +31,45 @@ impl RegisterValue for bool {
 
 #[derive(Default)]
 pub struct Registers {
-    inner: [u32; 32],
+    pub(super) x: [u32; 32],
 }
 
 impl Registers {
     pub(super) fn write(&mut self, rd: Register, value: impl RegisterValue) {
-        assert!(rd <= 32);
+        assert!(rd < 32);
         let value = value.as_u32();
-        self.inner[rd as usize] = value.as_u32();
+        self.x[rd as usize] = value.as_u32();
+        self.x[0] = 0; // x0 is hard wired to 0
     }
 
     pub fn read(&self, rd: Register) -> u32 {
-        assert!(rd <= 32);
+        assert!(rd < 32);
+        self.x[rd as usize]
+    }
+}
 
-        // Hard wired to 0
-        if rd == 0 {
-            return 0;
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-        self.inner[rd as usize]
+    #[test]
+    fn test_registers() {
+        let mut registers = Registers::default();
+        registers.write(1, 10);
+        assert_eq!(registers.read(1), 10);
+    }
+
+    #[test]
+    fn test_x0() {
+        let mut registers = Registers::default();
+        registers.write(0, 10);
+        assert_eq!(registers.read(0), 0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_out_of_bounds() {
+        let mut registers = Registers::default();
+        registers.write(32, 10);
     }
 }

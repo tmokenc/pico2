@@ -1,5 +1,6 @@
 use super::CpuArchitecture;
 use super::Stats;
+use crate::bus::Bus;
 
 #[derive(Default)]
 pub struct CortexM33 {
@@ -7,6 +8,10 @@ pub struct CortexM33 {
 }
 
 impl CpuArchitecture for CortexM33 {
+    fn set_core_id(&mut self, core_id: u8) {
+        todo!()
+    }
+
     fn get_pc(&self) -> u32 {
         todo!()
     }
@@ -15,7 +20,7 @@ impl CpuArchitecture for CortexM33 {
         todo!()
     }
 
-    fn tick(&mut self) {
+    fn tick(&mut self, bus: &mut Bus) {
         todo!()
     }
 

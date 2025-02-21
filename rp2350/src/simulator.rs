@@ -1,5 +1,5 @@
 use crate::clock::Clock;
-use crate::constants::*;
+use crate::common::*;
 use crate::processor::Rp2350;
 
 pub struct Simulator {
