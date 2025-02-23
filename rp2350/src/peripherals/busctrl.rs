@@ -1,13 +1,10 @@
 use super::*;
+use crate::bus::*;
+use crate::common::*;
 
-// Priority
-const PRIORITY_PROC0: u32 = 1 << 0;
-const PRIORITY_PROC1: u32 = 1 << 4;
-const PRIORITY_DMA_R: u32 = 1 << 8;
-const PRIORITY_DMA_W: u32 = 1 << 12;
-
-#[derive(Default, Clone, Copy)]
-enum PerformanceEventType {
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+// default to 0x1f => SRAM6 Access
+pub enum PerformanceEventType {
     // count cycles where any master stalled for any reason
     StallUpstream = 0,
     // count cycles where any master stalled due to a stall on the downstream bus
@@ -19,9 +16,9 @@ enum PerformanceEventType {
     Access = 3,
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+// default to 0x1f => SRAM6 Access
 enum PerformanceEventSource {
-    #[default]
     SiobProc1,
     SiobProc0,
     Apb,
@@ -29,6 +26,7 @@ enum PerformanceEventSource {
     Sram9,
     Sram8,
     Sram7,
+    #[default]
     Sram6,
     Sram5,
     Sram4,
@@ -42,7 +40,7 @@ enum PerformanceEventSource {
     Reserved,
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 struct PerformanceEvent {
     source: PerformanceEventSource,
     event: PerformanceEventType,
@@ -53,6 +51,42 @@ impl From<PerformanceEvent> for u32 {
         let source = perfsel.source as u8 as u32;
         let event = perfsel.event as u8 as u32;
         event + (source << 2)
+    }
+}
+
+// Map address to the performance event source
+impl PerformanceEventSource {
+    fn from_address(address: u32, master: Requestor) -> PerformanceEventSource {
+        let base_address = address & 0xF000_0000;
+        match base_address {
+            Bus::ROM => PerformanceEventSource::Rom,
+            Bus::SIO => match master {
+                Requestor::Proc0 => PerformanceEventSource::SiobProc0,
+                Requestor::Proc1 => PerformanceEventSource::SiobProc1,
+                _ => PerformanceEventSource::Reserved,
+            },
+            Bus::ABP => PerformanceEventSource::Apb,
+            Bus::AHB => PerformanceEventSource::Fastperi,
+            Bus::SRAM => match (address, (address >> 2) & 0b11) {
+                (0x2000_0000..=0x2003_FFFF, 0) => PerformanceEventSource::Sram0,
+                (0x2000_0000..=0x2003_FFFF, 1) => PerformanceEventSource::Sram1,
+                (0x2000_0000..=0x2003_FFFF, 2) => PerformanceEventSource::Sram2,
+                (0x2000_0000..=0x2003_FFFF, 3) => PerformanceEventSource::Sram3,
+                (0x2004_0000..=0x2007_FFFF, 0) => PerformanceEventSource::Sram4,
+                (0x2004_0000..=0x2007_FFFF, 1) => PerformanceEventSource::Sram5,
+                (0x2004_0000..=0x2007_FFFF, 2) => PerformanceEventSource::Sram6,
+                (0x2004_0000..=0x2007_FFFF, 3) => PerformanceEventSource::Sram7,
+                (0x2008_0000, _) => PerformanceEventSource::Sram8,
+                (0x2008_1000, _) => PerformanceEventSource::Sram9,
+                _ => PerformanceEventSource::Reserved,
+            },
+            Bus::XIP => match master {
+                Requestor::Proc0 => PerformanceEventSource::XipMain0,
+                Requestor::Proc1 => PerformanceEventSource::XipMain1,
+                _ => PerformanceEventSource::Reserved,
+            },
+            _ => PerformanceEventSource::Reserved,
+        }
     }
 }
 
@@ -98,6 +132,44 @@ pub struct BusCtrl {
     perfsel: [PerformanceEvent; 4],
 }
 
+impl BusCtrl {
+    // Priority
+    pub const PRIORITY_PROC0: u32 = 1 << 0;
+    pub const PRIORITY_PROC1: u32 = 1 << 4;
+    pub const PRIORITY_DMA_R: u32 = 1 << 8;
+    pub const PRIORITY_DMA_W: u32 = 1 << 12;
+
+    pub fn has_priority(&self, master: Requestor) -> bool {
+        match master {
+            Requestor::Proc0 => self.priority & Self::PRIORITY_PROC0 != 0,
+            Requestor::Proc1 => self.priority & Self::PRIORITY_PROC1 != 0,
+            Requestor::DmaR => self.priority & Self::PRIORITY_DMA_R != 0,
+            Requestor::DmaW => self.priority & Self::PRIORITY_DMA_W != 0,
+        }
+    }
+
+    pub fn count(&mut self, address: u32, master: Requestor, event: PerformanceEventType) {
+        // Disable by default
+        if !self.perfctr_en {
+            return;
+        }
+
+        let event = PerformanceEvent {
+            source: PerformanceEventSource::from_address(address, master),
+            event,
+        };
+
+        for i in 0..4 {
+            if self.perfsel[i] == event {
+                // Saturation to 24 bits
+                if self.perfctr[i] < 0x00FF_FFFF {
+                    self.perfctr[i] += 1;
+                }
+            }
+        }
+    }
+}
+
 impl Peripheral for BusCtrl {
     fn read(&self, addr: u16, ctx: &PeripheralAccessContext) -> PeripheralResult<u32> {
         match addr & 0xFFF {
@@ -126,17 +198,131 @@ impl Peripheral for BusCtrl {
             0x00 => self.priority = value,
             0x04 => (), /* Priority Ack, ignore */
             0x08 => self.perfctr_en = value & 1 == 1,
-            0x0C => self.perfctr[0] = value,
+            0x0C => self.perfctr[0] = 0, // Reset counter
             0x10 => self.perfsel[0] = value.into(),
-            0x14 => self.perfctr[1] = value,
+            0x14 => self.perfctr[1] = 0, // Reset counter
             0x18 => self.perfsel[1] = value.into(),
-            0x1C => self.perfctr[2] = value,
+            0x1C => self.perfctr[2] = 0, // Reset counter
             0x20 => self.perfsel[2] = value.into(),
-            0x24 => self.perfctr[3] = value,
+            0x24 => self.perfctr[3] = 0, // Reset counter
             0x28 => self.perfsel[3] = value.into(),
             _ => return Err(PeripheralError::OutOfBounds),
         }
 
         Ok(())
+    }
+}
+
+// TODO test
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bus::*;
+    use crate::common::*;
+    use crate::peripherals::*;
+
+    #[test]
+    fn priority() {
+        let mut ctrl = BusCtrl::default();
+
+        // Default
+        assert!(!ctrl.has_priority(Requestor::Proc0));
+        assert!(!ctrl.has_priority(Requestor::Proc1));
+        assert!(!ctrl.has_priority(Requestor::DmaR));
+        assert!(!ctrl.has_priority(Requestor::DmaW));
+
+        // Set priority
+        ctrl.write(
+            0,
+            BusCtrl::PRIORITY_PROC0 | BusCtrl::PRIORITY_DMA_W,
+            &Default::default(),
+        );
+
+        assert!(ctrl.has_priority(Requestor::Proc0));
+        assert!(!ctrl.has_priority(Requestor::Proc1));
+        assert!(!ctrl.has_priority(Requestor::DmaR));
+        assert!(ctrl.has_priority(Requestor::DmaW));
+
+        // Set all to one
+        ctrl.write(0, u32::MAX, &Default::default());
+        assert!(ctrl.has_priority(Requestor::Proc0));
+        assert!(ctrl.has_priority(Requestor::Proc1));
+        assert!(ctrl.has_priority(Requestor::DmaR));
+        assert!(ctrl.has_priority(Requestor::DmaW));
+    }
+
+    #[test]
+    fn counter() {
+        let mut ctrl = BusCtrl::default();
+
+        // default
+        assert_eq!(ctrl.read(0x08, &Default::default()), Ok(0)); // perfctr_en
+        assert_eq!(ctrl.read(0x10, &Default::default()), Ok(0x1f)); // default to 0x1f
+        assert_eq!(ctrl.read(0x18, &Default::default()), Ok(0x1f));
+        assert_eq!(ctrl.read(0x20, &Default::default()), Ok(0x1f));
+        assert_eq!(ctrl.read(0x28, &Default::default()), Ok(0x1f));
+
+        ctrl.write(0x10, 0x43, &Default::default()); // Rom Access
+
+        ctrl.count(Bus::SRAM, Requestor::Proc0, PerformanceEventType::Access);
+        ctrl.count(
+            Bus::SIO,
+            Requestor::Proc1,
+            PerformanceEventType::StallUpstream,
+        );
+        ctrl.count(Bus::ROM, Requestor::Proc0, PerformanceEventType::Access);
+        ctrl.count(Bus::ROM, Requestor::Proc1, PerformanceEventType::Access);
+        ctrl.count(
+            Bus::ROM,
+            Requestor::Proc1,
+            PerformanceEventType::AccessContested,
+        );
+        ctrl.count(
+            Bus::ROM,
+            Requestor::DmaR,
+            PerformanceEventType::StallUpstream,
+        );
+
+        // counter is disabled by default
+        assert_eq!(ctrl.read(0x08, &Default::default()), Ok(0));
+        assert_eq!(ctrl.read(0x0C, &Default::default()), Ok(0));
+        assert_eq!(ctrl.read(0x14, &Default::default()), Ok(0));
+        assert_eq!(ctrl.read(0x1C, &Default::default()), Ok(0));
+        assert_eq!(ctrl.read(0x24, &Default::default()), Ok(0));
+
+        // Enable counter
+        ctrl.write(0x08, 1, &Default::default());
+        assert_eq!(ctrl.read(0x08, &Default::default()), Ok(1));
+
+        ctrl.count(
+            0x2004_0000 + 0b1010, // Sram6
+            Requestor::Proc0,
+            PerformanceEventType::Access,
+        );
+        ctrl.count(
+            Bus::SIO,
+            Requestor::Proc1,
+            PerformanceEventType::StallUpstream,
+        );
+        ctrl.count(Bus::ROM, Requestor::Proc0, PerformanceEventType::Access);
+        ctrl.count(Bus::ROM, Requestor::Proc1, PerformanceEventType::Access);
+        ctrl.count(
+            Bus::ROM,
+            Requestor::Proc1,
+            PerformanceEventType::AccessContested,
+        );
+        ctrl.count(
+            Bus::ROM,
+            Requestor::DmaR,
+            PerformanceEventType::StallUpstream,
+        );
+
+        // Rom access was 2
+        assert_eq!(ctrl.read(0x0C, &Default::default()), Ok(2));
+        // Sram6 access for the rest and was 1
+        assert_eq!(ctrl.read(0x14, &Default::default()), Ok(1));
+        assert_eq!(ctrl.read(0x1C, &Default::default()), Ok(1));
+        assert_eq!(ctrl.read(0x24, &Default::default()), Ok(1));
     }
 }

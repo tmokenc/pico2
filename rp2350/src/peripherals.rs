@@ -17,6 +17,7 @@ pub enum PeripheralError {
 
 pub type PeripheralResult<T> = std::result::Result<T, PeripheralError>;
 
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub struct PeripheralAccessContext {
     pub secure: bool,
     pub requestor: Requestor,

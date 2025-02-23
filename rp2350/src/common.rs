@@ -9,7 +9,8 @@ pub enum Requestor {
     #[default]
     Proc0,
     Proc1,
-    Dma,
+    DmaR,
+    DmaW,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]

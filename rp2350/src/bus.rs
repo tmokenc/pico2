@@ -5,6 +5,8 @@ use num_derive::FromPrimitive;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+// TODO - counter
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BusError {
     BusFault,
@@ -135,13 +137,13 @@ pub struct Bus {
 
 impl Bus {
     // Address Map
-    const ROM: u32 = 0x0000_0000;
-    const XIP: u32 = 0x1000_0000;
-    const SRAM: u32 = 0x2000_0000;
-    const ABP: u32 = 0x4000_0000;
-    const AHB: u32 = 0x5000_0000;
-    const SIO: u32 = 0xd000_0000;
-    const CORTEX_M33_PRIVATE_REGISTERS: u32 = 0xe0000000;
+    pub const ROM: u32 = 0x0000_0000;
+    pub const XIP: u32 = 0x1000_0000;
+    pub const SRAM: u32 = 0x2000_0000;
+    pub const ABP: u32 = 0x4000_0000;
+    pub const AHB: u32 = 0x5000_0000;
+    pub const SIO: u32 = 0xd000_0000;
+    pub const CORTEX_M33_PRIVATE_REGISTERS: u32 = 0xe0000000;
 
     pub fn new() -> Self {
         Self::default()
@@ -246,7 +248,7 @@ impl Bus {
         match ctx.requestor {
             Requestor::Proc0 => self.core0_access = Some(status),
             Requestor::Proc1 => self.core1_access = Some(status),
-            Requestor::Dma => self.dma_access = Some(status),
+            Requestor::DmaR | Requestor::DmaW => self.dma_access = Some(status),
         }
 
         Ok(load_status)
@@ -275,7 +277,7 @@ impl Bus {
         match ctx.requestor {
             Requestor::Proc0 => self.core0_access = Some(status),
             Requestor::Proc1 => self.core1_access = Some(status),
-            Requestor::Dma => self.dma_access = Some(status),
+            Requestor::DmaR | Requestor::DmaW => self.dma_access = Some(status),
         }
 
         Ok(store_status)
