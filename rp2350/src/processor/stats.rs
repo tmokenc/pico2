@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+#[derive(Default)]
 pub struct Stats {
     pub executed_instructions: HashMap<String, u32>,
     pub executed_cycles: u32,

@@ -119,6 +119,10 @@ impl Interrupts {
             InterruptIter((global & !Self::CORE_LOCAL_IRQS_MASK) | core_local)
         }
     }
+
+    pub fn update(&mut self) {
+        // do nothing for now...
+    }
 }
 
 #[cfg(test)]

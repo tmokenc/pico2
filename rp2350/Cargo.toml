@@ -5,3 +5,6 @@ edition = "2021"
 author = "Nguyen Le Duy"
 
 [dependencies]
+num-traits = "0.2"
+num-derive = "0.4"
+log = "0.4"

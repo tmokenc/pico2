@@ -34,14 +34,20 @@ const fn func7(code: u32) -> u32 {
     code >> 25 & 0b1111111
 }
 
+pub(super) enum MemoryAccess {
+    Load(Register, Rc<RefCell<LoadStatus>>),
+    Store(Rc<RefCell<StoreStatus>>),
+    None,
+    // TODO Atomic
+}
+
 pub(super) struct ExecContext<'a> {
     pub(super) cycles: u8,
+    pub(super) next_pc_offset: i32,
     pub(super) register_read: Option<Register>,
     pub(super) register_write: Option<(Register, u32)>,
-    pub(super) next_pc_offset: i32,
     pub(super) exception: Option<Exception>,
-    pub(super) load: Option<(Register, Rc<RefCell<LoadStatus>>)>,
-    pub(super) store: Option<Rc<RefCell<StoreStatus>>>,
+    pub(super) memory_access: MemoryAccess,
     pub(super) bus: &'a mut Bus,
     pub(super) core: &'a mut Hazard3,
     pub(super) instruction_name: &'static str,
@@ -54,13 +60,16 @@ impl ExecContext<'_> {
             register_read: None,
             register_write: None,
             exception: None,
-            instruction_name: "",
+            instruction_name: "Unknown",
             next_pc_offset: 0,
-            load: None,
-            store: None,
+            memory_access: MemoryAccess::None,
             core,
             bus,
         }
+    }
+
+    fn privilege_mode(&self) -> PrivilegeMode {
+        self.core.csrs.privilege_mode
     }
 
     fn read_register(&mut self, reg: u8) -> u32 {
@@ -103,9 +112,7 @@ impl ExecContext<'_> {
         };
 
         match self.bus.load(address.as_(), bus_ctx) {
-            Ok(status) => {
-                self.load = Some((rd, status));
-            }
+            Ok(status) => self.memory_access = MemoryAccess::Load(rd, status),
             Err(_e) => {
                 self.raise_exception(Exception::LoadFault);
             }
@@ -130,7 +137,7 @@ impl ExecContext<'_> {
         };
 
         match self.bus.store(address, value, bus_ctx) {
-            Ok(status) => self.store = Some(status),
+            Ok(status) => self.memory_access = MemoryAccess::Store(status),
             Err(_e) => self.raise_exception(Exception::StoreFault),
         }
     }
@@ -195,7 +202,7 @@ fn exec_system_instruction(code: u32, ctx: &mut ExecContext) {
         0b00110000001000000000000001110011 => {
             ctx.inst_name("MRET");
 
-            if ctx.core.privilege_mode != PrivilegeMode::Machine {
+            if ctx.privilege_mode() != PrivilegeMode::Machine {
                 // TODO: Raise exception
             }
 
@@ -203,7 +210,7 @@ fn exec_system_instruction(code: u32, ctx: &mut ExecContext) {
         }
         0b00010000010100000000000001110011 => {
             ctx.inst_name("WFI");
-            if ctx.core.privilege_mode != PrivilegeMode::Machine {
+            if ctx.privilege_mode() != PrivilegeMode::Machine {
                 // TODO check for MSTATUS.TV is clear or not (must be cleared)
             }
             ctx.wfi();
@@ -1076,55 +1083,266 @@ mod tests {
     use crate::bus::Bus;
     use crate::processor::*;
 
-    #[test]
-    fn test_lui() {
-        let mut core = Hazard3::default();
-        let mut bus = Bus::new();
-        let mut ctx = ExecContext::new(&mut core, &mut bus);
+    const PC: u32 = 0x1000;
 
-        exec_instruction(0b00000001100100100101111110110111, &mut ctx);
+    macro_rules! instruction_test {
+        ($name:ident, $instr:expr, $ctx:ident, { $($assertion:tt)* }) => {
+            #[test]
+            fn $name() {
+                let mut core = Hazard3::default();
+                core.set_pc(PC);
+                // core.registers.write(1, PC);
+                let mut bus = Bus::new();
+                let mut $ctx = ExecContext::new(&mut core, &mut bus);
+                exec_instruction($instr, &mut $ctx);
+                $($assertion)*
+            }
+        };
+    }
 
+    macro_rules! aritmetic_test {
+        ($name:ident, $instr_mask:expr, [$($a:expr, $b:expr => $expected:expr),* $(,)?]) => {
+            #[test]
+            fn $name() {
+                let mut core = Hazard3::default();
+                let mut bus = Bus::new();
+                core.set_pc(PC);
+                let rs1: u32 = 1;
+                let rs2: u32 = 2;
+                let rd: u32 = 3;
+
+                {
+                    $(
+                        core.registers.write(rs1 as u8, $a);
+                        core.registers.write(rs2 as u8, $b);
+
+                        let instr = $instr_mask | (rd << 7) | (rs1 << 15) | (rs2 << 20);
+                        let mut ctx = ExecContext::new(&mut core, &mut bus);
+                        exec_instruction(instr, &mut ctx);
+
+                        assert_eq!(ctx.register_write, Some((rd as u8, $expected)));
+                    )*
+                }
+            }
+        };
+
+        ($name:ident, $name_imm:ident, $instr_mask:expr, [$($a:expr, $b:expr => $expected:expr),* $(,)?]) => {
+            aritmetic_test!($name, $instr_mask, [$($a, $b => $expected),*]);
+
+            #[test]
+            fn $name_imm() {
+                let mut core = Hazard3::default();
+                let mut bus = Bus::new();
+                core.set_pc(PC);
+                let rs1: u32 = 1;
+                let rs2: u32 = 2;
+                let rd: u32 = 3;
+
+                {
+                    $(
+                        core.registers.write(rs1 as u8, $a);
+
+                        let instr = ($instr_mask & !0b100000) | (rd << 7) | (rs1 << 15) | (($b as u32) << 20);
+                        let mut ctx = ExecContext::new(&mut core, &mut bus);
+                        exec_instruction(instr, &mut ctx);
+
+                        assert_eq!(ctx.register_write, Some((rd as u8, $expected)));
+                    )*
+                }
+            }
+        };
+
+        // For shift instructions with immediate
+        ($name:ident,, $name_imm:ident, $instr_mask:expr, [$($a:expr, $b:expr => $expected:expr),* $(,)?]) => {
+            aritmetic_test!($name, $instr_mask, [$($a, $b => $expected),*]);
+
+            #[test]
+            fn $name_imm() {
+                let mut core = Hazard3::default();
+                let mut bus = Bus::new();
+                core.set_pc(PC);
+                let rs1: u32 = 1;
+                let rs2: u32 = 2;
+                let rd: u32 = 3;
+
+                {
+                    $(
+                        core.registers.write(rs1 as u8, $a);
+
+                        let instr = ($instr_mask & !0b100000) | (rd << 7) | (rs1 << 15) | ((($b as u32) & 0b11111) << 20);
+                        let mut ctx = ExecContext::new(&mut core, &mut bus);
+                        exec_instruction(instr, &mut ctx);
+
+                        assert_eq!(ctx.register_write, Some((rd as u8, $expected)));
+                    )*
+                }
+            }
+        };
+    }
+
+    // for branch instructions
+    macro_rules! branch_test {
+        ($name:ident, $instr_mask:expr, [$($a:expr, $b:expr => $expected:expr),* $(,)?]) => {
+            #[test]
+            fn $name() {
+                let mut core = Hazard3::default();
+                let mut bus = Bus::new();
+                core.set_pc(PC);
+                let rs1: u32 = 1;
+                let rs2: u32 = 2;
+                let rd: u32 = 3;
+                let offset = 0x100;
+                let offset_mask = 1 << 28;
+
+                {
+                    $(
+                        core.registers.write(rs1 as u8, $a);
+                        core.registers.write(rs2 as u8, $b);
+
+                        let instr = ($instr_mask | offset_mask) | (rs1 << 15) | (rs2 << 20);
+                        let mut ctx = ExecContext::new(&mut core, &mut bus);
+                        exec_instruction(instr, &mut ctx);
+
+                        if $expected {
+                            assert_eq!(ctx.next_pc_offset, offset);
+                        } else {
+                            assert_eq!(ctx.next_pc_offset, 4);
+                        }
+                    )*
+                }
+            }
+        };
+    }
+
+    instruction_test!(lui, 0b00000001100100100101111110110111, ctx, {
         assert_eq!(ctx.register_write, Some((31, 6437 << 12)));
-    }
+    });
 
-    #[test]
-    fn test_auipc() {
-        let mut core = Hazard3::default();
-        core.set_pc(0x1000);
-        let mut bus = Bus::new();
-        let mut ctx = ExecContext::new(&mut core, &mut bus);
+    instruction_test!(auipc, 0b00000001100100100101111110010111, ctx, {
+        assert_eq!(ctx.register_write, Some((31, PC + (6437 << 12))));
+    });
 
-        exec_instruction(0b00000001100100100101111110010111, &mut ctx);
-
-        assert_eq!(ctx.register_write, Some((31, 0x1000 + (6437 << 12))));
-    }
-
-    #[test]
-    fn test_jal() {
-        let mut core = Hazard3::default();
-        core.set_pc(0x1000);
-        let mut bus = Bus::new();
-        let mut ctx = ExecContext::new(&mut core, &mut bus);
-
-        exec_instruction(0b00010010010100000001111111101111, &mut ctx);
-
-        assert_eq!(ctx.register_write, Some((31, 0x1000 + 4)));
+    instruction_test!(jal, 0b00010010010100000001111111101111, ctx, {
+        assert_eq!(ctx.register_write, Some((31, PC + 4)));
         assert_eq!(ctx.next_pc_offset, 6437 & !1);
-    }
+    });
 
-    #[test]
-    fn test_jalr() {
-        let mut core = Hazard3::default();
-        core.set_pc(0x1000);
-        core.registers.write(24, 0x2000);
-        let mut bus = Bus::new();
-        let mut ctx = ExecContext::new(&mut core, &mut bus);
-
-        exec_instruction(0b11011100110000000000110001100111, &mut ctx);
-
-        assert_eq!(ctx.register_write, Some((24, 0x1000 + 4)));
+    instruction_test!(jalr, 0b11011100110000000000110001100111, ctx, {
+        assert_eq!(ctx.register_write, Some((24, PC + 4)));
         assert_eq!(ctx.next_pc_offset, -564 & !1);
-    }
+    });
 
-    // TODO: Add more tests
+    branch_test!(beq, 0b00000000000000000000000001100011, [
+        10, 10 => true,
+        10, -10 => false,
+        10, 20 => false,
+    ]);
+
+    branch_test!(bne, 0b00000000000000000001000001100011, [
+        10, 10 => false,
+        10, -10 => true,
+        10, 20 => true,
+    ]);
+
+    branch_test!(bge, 0b00000000000000000101000001100011, [
+        10, 10 => true,
+        10, -10 => true,
+        -10, 10 => false,
+        -10, -10 => true,
+        0, 1 => false,
+        1, 0 => true,
+        -1, 0 => false,
+    ]);
+
+    branch_test!(blt, 0b00000000000000000100000001100011, [
+        10, 10 => false,
+        10, -10 => false,
+        -10, 10 => true,
+        -10, -10 => false,
+        0, 1 => true,
+        1, 0 => false,
+        -1, 0 => true,
+    ]);
+
+    branch_test!(bgeu, 0b00000000000000000111000001100011, [
+        10, 10 => true,
+        10, 20 => false,
+        20, 10 => true,
+        0, 1 => false,
+        1, 0 => true,
+        -1, 0 => true,
+    ]);
+
+    branch_test!(bltu, 0b00000000000000000110000001100011, [
+        10, 10 => false,
+        10, 20 => true,
+        20, 10 => false,
+        0, 1 => true,
+        1, 0 => false,
+        -1, 0 => false,
+    ]);
+
+    // Load
+    // instruction_test!(lb, 0b
+    //
+
+    // Store
+    //
+
+    // Atomic
+    //
+
+    aritmetic_test!(add, addi, 0b00000000000000000000000000110011, [10, 20 => 30]);
+    aritmetic_test!(and, andi, 0b00000000000000000111000000110011, [0b1010, 0b1100 => 0b1000]);
+    aritmetic_test!(or, ori, 0b00000000000000000110000000110011, [0b1010, 0b1100 => 0b1110]);
+    aritmetic_test!(sll,, slli, 0b00000000000000000001000000110011, [
+        0b1010, 0b111100 => 0b1010 << 0b011100,
+        0b1010, 0b11100 => 0b1010 << 0b011100,
+        0b1010, 0 => 0b1010,
+    ]);
+
+    aritmetic_test!(slt, slti, 0b00000000000000000010000000110011, [
+        10, 20 => 1,
+        20, 10 => 0,
+        1010, 1010 => 0,
+        -10, 10 => 1,
+        -10, -20i32 => 0,
+        -10, -10i32 => 0,
+    ]);
+
+    aritmetic_test!(sltu,, sltiu, 0b00000000000000000011000000110011, [
+        10, 20 => 1,
+        20, 10 => 0,
+        1010, 1010 => 0,
+        -1, 1 => 0, /* 0b1111_1111 < 0b0000_0001 */
+    ]);
+
+    aritmetic_test!(sra,, srai, 0b01000000000000000101000000110011, [
+        0b1010, 0b111100 => 0b1010 >> 0b011100,
+        0b1010, 0b11100 => 0b1010 >> 0b011100,
+        0b1010, 0 => 0b1010,
+        -1, 1 => u32::MAX,
+        -1, 10000 => u32::MAX,
+        -1 & !0b111, 1 => u32::MAX & !0b11,
+    ]);
+
+    aritmetic_test!(srl,, srli, 0b00000000000000000101000000110011, [
+        0b1010, 0b111100 => 0b1010 >> 0b011100,
+        0b1010, 0b11100 => 0b1010 >> 0b011100,
+        0b1010, 0 => 0b1010,
+        -1, 1 => u32::MAX >> 1,
+        -1, 0b11101 => u32::MAX >> 0b11101,
+        -1 & !0b111, 1 => (u32::MAX >> 1) & !0b11,
+    ]);
+
+    aritmetic_test!(sub, 0b01000000000000000000000000110011, [
+        20, 10 => 10,
+        10, 20 => u32::MAX - 9,
+        1, 2 => u32::MAX,
+    ]);
+
+    aritmetic_test!(xor, xori, 0b00000000000000000100000000110011, [
+        0b1010, 0b1100 => 0b0110,
+        0b1010, 0b1010 => 0,
+    ]);
 }

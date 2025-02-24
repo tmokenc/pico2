@@ -1,6 +1,7 @@
 use crate::common::*;
 use crate::memory::*;
 use crate::peripherals::*;
+use crate::utils::*;
 use num_derive::FromPrimitive;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -32,19 +33,17 @@ impl From<crate::memory::MemoryOutOfBoundsError> for BusError {
 
 /// Status of a load transaction
 /// this will be wrapped in a RC<RefCell<>> to allow for mutable access to the status
-#[derive(Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub(crate) enum LoadStatus {
     #[default]
     Waiting,
-    Word(u32),
-    HalfWord(u16),
-    Byte(u8),
+    Done(u32),
     Error(BusError),
 }
 
 /// Status of a store transaction
 /// this will be wrapped in a RC<RefCell<>> to allow for mutable access to the status
-#[derive(Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub(crate) enum StoreStatus {
     #[default]
     Waiting,
@@ -182,16 +181,15 @@ impl Bus {
                 let result = match status.ctx.size {
                     DataSize::Byte => self
                         .read_u8(status.address, &status.ctx)
-                        .map(|v| LoadStatus::Byte(v)),
+                        .map(|v| sign_extend(v as u32, 7)),
                     DataSize::HalfWord => self
                         .read_u16(status.address, &status.ctx)
-                        .map(|v| LoadStatus::HalfWord(v)),
-                    DataSize::Word => self
-                        .read_u32(status.address, &status.ctx)
-                        .map(|v| LoadStatus::Word(v)),
+                        .map(|v| sign_extend(v as u32, 15)),
+                    DataSize::Word => self.read_u32(status.address, &status.ctx),
                 };
+
                 *load_status.borrow_mut() = match result {
-                    Ok(v) => v,
+                    Ok(v) => LoadStatus::Done(v),
                     Err(_e) => LoadStatus::Error(BusError::LoadError),
                 };
             }
