@@ -1,5 +1,5 @@
 use super::{Register, Registers};
-use crate::utils::{extract_bits, sign_extend};
+use crate::utils::{extract_bit, extract_bits, sign_extend};
 use core::ops::RangeInclusive;
 
 #[derive(Default)]
@@ -113,118 +113,108 @@ impl From<u32> for JType {
 }
 
 // ====== Compresed Instruction Formats ======
-pub(super) struct CRType {
-    pub(super) rs2: Register,
-    pub(super) rs1: Register, // rd = rs1
-}
-
-pub(super) struct CIType {
-    pub(super) imm: u32,
-    pub(super) rs1: Register, // rd = rs1
-}
-
-pub(super) struct CSSType {
-    pub(super) imm: u32,
-    pub(super) rs2: Register,
-}
-
-pub(super) struct CIWType {
-    pub(super) imm: u32,
-    pub(super) rd: Register,
-}
-
-pub(super) struct CLType {
-    pub(super) imm: u32,
-    pub(super) rd: Register,
-    pub(super) rs1: Register,
-}
-
-pub(super) struct CSType {
-    pub(super) imm: u32,
-    pub(super) rs2: Register,
-    pub(super) rs1: Register,
-}
-
-pub(super) struct CAType {
-    pub(super) rs2: Register,
-    pub(super) rs1: Register, // rd = rs1
-}
-
-pub(super) struct CBType {
-    pub(super) offset: u32,
-    pub(super) rs1: Register,
-}
-
-pub(super) struct CJType {
-    pub(super) jump_target: u32,
-}
-
-impl From<u16> for CRType {
-    fn from(inst: u16) -> Self {
-        Self {
-            rs2: crs2(inst),
-            rs1: crs1(inst),
-        }
-    }
-}
-
-// impl From<u16> for CIType {
-//     fn from(inst: u16) -> Self {
-//         Self {
-//             rd: extract_bits(inst as u32, 7..=11),
-//             imm: load_imm(inst as u32, &[12..=12, 5..=6, 10..=11], true),
-//         }
-//     }
-// }
-
-impl From<u16> for CAType {
-    fn from(inst: u16) -> Self {
-        Self {
-            rs2: crs2_(inst),
-            rs1: crs1_(inst),
-        }
-    }
-}
-
-// impl From<u16> for CBType {
-//     fn from(inst: u16) -> Self {
-//         Self {
-//             offset: load_imm(inst as u32, &[12..=12, 5..=8, 10..=10, 3..=4, 1..=2], true) << 1,
-//             rs1: crs1_(inst),
-//         }
-//     }
-// }
-//
-// impl From<u16> for CJType {
-//     fn from(inst: u16) -> Self {
-//         Self {
-//             jump_target: load_imm(inst as u32, &[12..=12, 8..=11, 1..=4, 10..=10, 5..=6, 7..=7], true) << 1,
-//         }
-//     }
-// }
+// These has uniform formats, but the parsing for immediates is vary from insstruction to
+// instruction. That's why we define function for basic parsing of RS1, RS2, RD
+// There are 2 type of rs, full and compressed.
+// The compressed rs are shifted by 8 and the function name is suffixed with _
 
 #[inline]
 /// Compressed instruction rs2
-fn crs2(inst: u16) -> Register {
+pub fn crs2(inst: u16) -> Register {
     extract_bits(inst, 2..=6) as Register
 }
 
 #[inline]
 /// Compressed instruction rd
-fn crs1(inst: u16) -> Register {
+pub fn crs1(inst: u16) -> Register {
     extract_bits(inst, 7..=11) as Register
 }
 
 #[inline]
-/// Compressed instruction rs2'
-fn crs2_(inst: u16) -> Register {
+/// Compressed instruction rs2' (shifted by 8)
+pub fn crs2_(inst: u16) -> Register {
     extract_bits(inst, 2..=4) as Register + 8
 }
 
 #[inline]
-/// Compressed instruction rs1'
-fn crs1_(inst: u16) -> Register {
+/// Compressed instruction rs1' (shifted by 8)
+pub fn crs1_(inst: u16) -> Register {
     extract_bits(inst, 7..=9) as Register + 8
+}
+
+#[inline]
+pub fn imm_ci(inst: u16) -> u32 {
+    (extract_bits(inst as u32, 2..=5) as u32)
+        .overflowing_sub((extract_bit(inst as u32, 12) as u32) << 5)
+        .0
+}
+
+#[inline]
+pub fn imm_cj(inst: u16) -> u32 {
+    let raw: u16 = (extract_bit(inst, 12) << 11)
+        | (extract_bit(inst, 11) << 4)
+        | (extract_bits(inst, 9..=10) << 8)
+        | (extract_bit(inst, 8) << 10)
+        | (extract_bit(inst, 7) << 6)
+        | (extract_bit(inst, 6) << 7)
+        | (extract_bits(inst, 3..=5) << 1)
+        | (extract_bit(inst, 2) << 5);
+
+    sign_extend(raw as u32, 11)
+}
+
+#[inline]
+pub fn imm_cb(inst: u16) -> u32 {
+    let raw: u16 = (extract_bit(inst, 12) << 8)
+        | (extract_bits(inst, 10..=11) << 3)
+        | (extract_bits(inst, 5..=6) << 6)
+        | (extract_bits(inst, 3..=4) << 1)
+        | (extract_bit(inst, 2) << 5);
+
+    sign_extend(raw as u32, 8)
+}
+
+// For Zcmp instructions that expand into a sequence of intructions
+#[inline]
+fn zcmp_rlist(code: u16) -> u16 {
+    extract_bits(code, 4..=7)
+}
+
+pub(super) fn zcmp_stack_adj(code: u16) -> u32 {
+    let base = match zcmp_rlist(code) {
+        4..=7 => 16,
+        8..=11 => 32,
+        12..=14 => 48,
+        15 => 64,
+        _ => 0,
+    };
+
+    base + 16 * (extract_bits(code, 2..=3) as u32)
+}
+
+pub(super) fn zcmp_reg_mask(code: u16) -> u32 {
+    let rlist = extract_bits(code, 4..=7);
+
+    match rlist {
+        04 => 0b00000000000000000000000000000010,
+        05 => 0b00000000000000000000000100000010,
+        06 => 0b00000000000000000000001100000010,
+        07 => 0b00000000000001000000001100000010,
+        08 => 0b00000000000011000000001100000010,
+        09 => 0b00000000000111000000001100000010,
+        10 => 0b00000000001111000000001100000010,
+        11 => 0b00000000011111000000001100000010,
+        12 => 0b00000000111111000000001100000010,
+        13 => 0b00000001111111000000001100000010,
+        14 => 0b00000011111111000000001100000010,
+        15 => 0b00001111111111000000001100000010,
+        _ => 0,
+    }
+}
+
+#[inline]
+pub(super) fn zcmp_s_mapping(s_raw: Register) -> Register {
+    s_raw + 8 + 8 * (((s_raw & 0x6) != 0) as Register)
 }
 
 #[inline]
@@ -456,5 +446,23 @@ mod test {
         assert_eq!(stype.rs1, 0);
         assert_eq!(stype.rs2, 0);
         assert_eq!(stype.imm as i32, -1);
+    }
+
+    #[test]
+    fn test_imm_cj() {
+        let inst = 0b1111111111111111;
+        assert_eq!(imm_cj(inst), -1i32 as u32);
+    }
+
+    #[test]
+    fn test_imm_ci() {
+        let inst = 0b1111111111111111;
+        assert_eq!(imm_ci(inst), -1i32 as u32);
+    }
+
+    #[test]
+    fn test_imm_cb() {
+        let inst = 0b1111111111111111;
+        assert_eq!(imm_cb(inst), -1i32 as u32);
     }
 }

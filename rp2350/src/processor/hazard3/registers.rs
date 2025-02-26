@@ -29,6 +29,12 @@ impl RegisterValue for bool {
     }
 }
 
+impl RegisterValue for u16 {
+    fn as_u32(&self) -> u32 {
+        *self as u32
+    }
+}
+
 #[derive(Default)]
 pub struct Registers {
     pub(super) x: [u32; 32],

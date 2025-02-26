@@ -4,7 +4,7 @@ use super::PrivilegeMode;
 use super::*;
 use crate::bus::{Bus, BusAccessContext, LoadStatus, StoreStatus};
 use crate::common::*;
-use crate::utils::{extract_bits, sign_extend};
+use crate::utils::{extract_bit, extract_bits, sign_extend, Fifo};
 use num_traits::AsPrimitive;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -34,11 +34,32 @@ const fn func7(code: u32) -> u32 {
     code >> 25 & 0b1111111
 }
 
+type AtomicOp = fn(u32, u32) -> u32;
+
 pub(super) enum MemoryAccess {
     Load(Register, Rc<RefCell<LoadStatus>>),
     Store(Rc<RefCell<StoreStatus>>),
     None,
     // TODO Atomic
+}
+
+pub(super) type InstructionSequence = Fifo<ZcmpAction, 32>;
+
+#[derive(Default, Debug, Clone, Copy)]
+pub(super) enum ZcmpAction {
+    RegisterUpdate(Register, u32),
+    // From, To
+    RegisterMove(Register, Register),
+    Store {
+        address: u32,
+        from_register: Register,
+    },
+    Load {
+        address: u32,
+        to_register: Register,
+    },
+    #[default]
+    Return,
 }
 
 pub(super) struct ExecContext<'a> {
@@ -51,6 +72,8 @@ pub(super) struct ExecContext<'a> {
     pub(super) bus: &'a mut Bus,
     pub(super) core: &'a mut Hazard3,
     pub(super) instruction_name: &'static str,
+    pub(super) mret: bool,
+    pub(super) zcmp_actions: InstructionSequence,
 }
 
 impl ExecContext<'_> {
@@ -63,6 +86,8 @@ impl ExecContext<'_> {
             instruction_name: "Unknown",
             next_pc_offset: 0,
             memory_access: MemoryAccess::None,
+            zcmp_actions: Fifo::default(),
+            mret: false,
             core,
             bus,
         }
@@ -94,7 +119,7 @@ impl ExecContext<'_> {
         self.core.csrs.write(csr.as_(), value.as_())
     }
 
-    fn load(&mut self, rd: Register, address: impl AsPrimitive<u32>, size: DataSize) {
+    fn load(&mut self, rd: Register, address: impl AsPrimitive<u32>, size: DataSize, signed: bool) {
         if !is_address_aligned(address.as_(), size) {
             self.raise_exception(Exception::LoadAlignment);
             return;
@@ -102,7 +127,8 @@ impl ExecContext<'_> {
 
         let bus_ctx = BusAccessContext {
             size,
-            secure: self.core.privilege_mode == PrivilegeMode::Machine,
+            signed,
+            secure: self.privilege_mode() == PrivilegeMode::Machine,
             architecture: ArchitectureType::Hazard3,
             requestor: match self.core.csrs.core_id {
                 0 => Requestor::Proc0,
@@ -127,7 +153,8 @@ impl ExecContext<'_> {
 
         let bus_ctx = BusAccessContext {
             size,
-            secure: self.core.privilege_mode == PrivilegeMode::Machine,
+            signed: false,
+            secure: self.privilege_mode() == PrivilegeMode::Machine,
             architecture: ArchitectureType::Hazard3,
             requestor: match self.core.csrs.core_id {
                 0 => Requestor::Proc0,
@@ -148,6 +175,10 @@ impl ExecContext<'_> {
 
     fn set_next_pc_offset(&mut self, offset: impl AsPrimitive<i32>) {
         self.next_pc_offset = offset.as_();
+    }
+
+    fn set_absolute_pc_value(&mut self, value: u32) {
+        self.next_pc_offset = value.wrapping_sub(self.core.pc) as i32;
     }
 
     fn raise_exception(&mut self, exception: Exception) {
@@ -172,6 +203,73 @@ impl ExecContext<'_> {
     fn wfi(&mut self) {
         self.core.state = State::Wfi;
     }
+
+    fn mret(&mut self) {
+        self.mret = true;
+    }
+
+    fn add_zcmp_action(&mut self, action: ZcmpAction) {
+        self.zcmp_actions.push(action);
+    }
+
+    fn zcmp_stack_push(&mut self, code: u16) {
+        let mut addr = self.read_register(2);
+        let sp = addr - zcmp_stack_adj(code);
+        let reg_mask = zcmp_reg_mask(code);
+
+        if reg_mask == 0 {
+            // reserved
+            self.raise_exception(Exception::IllegalInstruction);
+            return;
+        }
+
+        for i in (1..32).rev() {
+            if (reg_mask & (1 << i)) != 0 {
+                addr -= 4;
+                self.add_zcmp_action(ZcmpAction::Store {
+                    address: addr,
+                    from_register: i,
+                });
+            }
+        }
+
+        self.add_zcmp_action(ZcmpAction::RegisterUpdate(2, sp));
+    }
+
+    fn zcmp_stack_pop(&mut self, code: u16, ret: bool, clear_a0: bool) {
+        // CM.POP/CM.POPRET/CM.POPRETZ
+        let mut addr = self.read_register(2) + zcmp_stack_adj(code);
+        let sp = addr;
+        let reg_mask = zcmp_reg_mask(code);
+
+        if reg_mask == 0 {
+            // reserved
+            self.raise_exception(Exception::IllegalInstruction);
+            return;
+        }
+
+        for i in (1..32).rev() {
+            if (reg_mask & (1 << i)) != 0 {
+                addr -= 4;
+                self.add_zcmp_action(ZcmpAction::Load {
+                    address: addr,
+                    to_register: i,
+                });
+            }
+        }
+
+        if clear_a0 {
+            // clear A0 register
+            self.add_zcmp_action(ZcmpAction::RegisterUpdate(10, 0));
+        }
+
+        if ret {
+            self.add_zcmp_action(ZcmpAction::Return);
+        }
+
+        // update stack pointer
+        self.add_zcmp_action(ZcmpAction::RegisterUpdate(2, sp));
+    }
 }
 
 fn is_address_aligned(address: u32, size: DataSize) -> bool {
@@ -188,7 +286,7 @@ fn exec_system_instruction(code: u32, ctx: &mut ExecContext) {
             ctx.inst_name("ECALL");
             ctx.set_cycles(3);
 
-            if ctx.core.privilege_mode == PrivilegeMode::Machine {
+            if ctx.privilege_mode() == PrivilegeMode::Machine {
                 ctx.raise_exception(Exception::EcallMMode);
             } else {
                 ctx.raise_exception(Exception::EcallUMode);
@@ -203,10 +301,11 @@ fn exec_system_instruction(code: u32, ctx: &mut ExecContext) {
             ctx.inst_name("MRET");
 
             if ctx.privilege_mode() != PrivilegeMode::Machine {
-                // TODO: Raise exception
+                ctx.raise_exception(Exception::IllegalInstruction);
+                return;
             }
 
-            todo!()
+            ctx.mret();
         }
         0b00010000010100000000000001110011 => {
             ctx.inst_name("WFI");
@@ -309,23 +408,23 @@ fn exec_load_instruction(code: u32, ctx: &mut ExecContext) {
     match func3(code) {
         0b000 => {
             ctx.inst_name("LB");
-            ctx.load(rd, address, DataSize::Byte);
+            ctx.load(rd, address, DataSize::Byte, true);
         }
         0b001 => {
             ctx.inst_name("LH");
-            ctx.load(rd, address, DataSize::HalfWord);
+            ctx.load(rd, address, DataSize::HalfWord, true);
         }
         0b010 => {
             ctx.inst_name("LW");
-            ctx.load(rd, address, DataSize::Word);
+            ctx.load(rd, address, DataSize::Word, true);
         }
         0b100 => {
             ctx.inst_name("LBU");
-            ctx.load(rd, address, DataSize::Byte); // TODO
+            ctx.load(rd, address, DataSize::Byte, false);
         }
         0b101 => {
             ctx.inst_name("LHU");
-            ctx.load(rd, address, DataSize::HalfWord); // TODO
+            ctx.load(rd, address, DataSize::HalfWord, false);
         }
         _ => ctx.raise_exception(Exception::IllegalInstruction),
     }
@@ -808,202 +907,368 @@ fn exec_compressed_instruction(code: u16, ctx: &mut ExecContext) {
     match code & OPCODE_COMPRESSED_MASK {
         0b0000000000000000 => {
             ctx.inst_name("C.ADDI4SPN");
-            // illegal if imm 0
-            // TODO
+            let rd = crs2_(code);
+            let nzuimm = (extract_bits(code, 11..=12) << 4)
+                + (extract_bits(code, 7..=10) << 6)
+                + (extract_bit(code, 6) << 2)
+                + (extract_bit(code, 5) << 3);
+
+            if (nzuimm == 0) {
+                ctx.raise_exception(Exception::IllegalInstruction);
+                return;
+            }
+
+            let rd_value = ctx.read_register(rd);
+            ctx.write_register(rd, rd_value.wrapping_add(nzuimm.into()));
         }
         0b0100000000000000 => {
             ctx.inst_name("C.LW");
-            // TODO
+            let rd = crs2_(code);
+            let rs1 = crs1_(code);
+            let addr = ctx.read_register(rs1);
+            let offset = (extract_bit(code, 6) << 2)
+                + (extract_bits(code, 10..=12) << 3)
+                + (extract_bit(code, 5) << 6);
+
+            ctx.load(rd, addr.wrapping_add(offset as _), DataSize::Word, true);
         }
         0b1100000000000000 => {
             ctx.inst_name("C.SW");
-            // TODO
+            let rd = crs2_(code);
+            let rs1 = crs1_(code);
+            let addr = ctx.read_register(rs1);
+            let offset = (extract_bit(code, 6) << 2)
+                + (extract_bits(code, 10..=12) << 3)
+                + (extract_bit(code, 5) << 6);
+
+            let value = ctx.read_register(rd);
+            ctx.store(addr.wrapping_add(offset as _), value, DataSize::Word);
         }
         0b0000000000000001 => {
             ctx.inst_name("C.ADDI");
-            // TODO
+            let rd = crs1(code);
+            let a = ctx.read_register(rd);
+            let imm = imm_ci(code);
+            ctx.write_register(rd, a.wrapping_add(imm));
         }
         0b0010000000000001 => {
             ctx.inst_name("C.JAL");
-            // TODO
+            let pc = ctx.get_pc();
+            ctx.set_next_pc_offset(imm_cj(code));
+            ctx.write_register(1, pc + 2); // rd is 1
         }
         0b1010000000000001 => {
             ctx.inst_name("C.J");
-            // TODO
+            let offset = imm_cj(code);
+            ctx.set_next_pc_offset(offset);
         }
         0b0100000000000001 => {
             ctx.inst_name("C.LI");
-            // TODO
+            let rd = crs1(code);
+            let imm = imm_ci(code);
+            ctx.write_register(rd, imm);
         }
         0b0110000000000001 => {
-            ctx.inst_name("C.LUI");
-            // reserved if imm 0
-            // TODO
+            let rd = crs1(code);
+
+            if rd == 0 {
+                // reserved if imm 0
+                ctx.raise_exception(Exception::IllegalInstruction);
+                return;
+            }
+
+            if rd == 2 {
+                // ADDI16SPN
+                ctx.inst_name("C.ADDI16SPN");
+                let imm = (extract_bit(code, 6) << 4)
+                    | (extract_bit(code, 5) << 6)
+                    | (extract_bits(code, 3..=4) << 7)
+                    | (extract_bit(code, 2) << 5)
+                    | (extract_bit(code, 12) << 9);
+                let imm_signed = sign_extend(imm as u32, 9); // check correctness
+                let sp = ctx.read_register(2);
+                ctx.write_register(2, sp.wrapping_add(imm_signed));
+            } else {
+                ctx.inst_name("C.LUI");
+                let imm = ((extract_bits(code, 2..=6) as u32) << 12)
+                    | (extract_bits(code, 12..=12) as u32) << 17;
+                let imm_signed = sign_extend(imm, 17);
+                ctx.write_register(rd, imm);
+            }
         }
-        0b1000000000000001 => match (code >> 10) & 0b111 {
-            0b000 => {
-                ctx.inst_name("C.SRLI");
-                // imm[5] (instr[12]) must be 0, else reserved NSE
-                // TODO
-            }
-            0b001 => {
-                ctx.inst_name("C.SRAI");
-                // imm[5] (instr[12]) must be 0, else reserved NSE
-                // TODO
-            }
-            0b010 | 0b110 => {
-                ctx.inst_name("C.ANDI");
-                // TODO
-            }
-            0b011 => match (code >> 5) & 0b11 {
-                0b00 => {
-                    ctx.inst_name("C.SUB");
-                    // TODO
+        0b1000000000000001 => {
+            let rd = crs1_(code);
+            let rd_value = ctx.read_register(rd);
+
+            match extract_bits(code, 10..=12) {
+                0b000 => {
+                    ctx.inst_name("C.SRLI");
+                    // imm[5] (instr[12]) must be 0, else reserved NSE
+                    let shamt = extract_bits(code, 2..=6);
+                    ctx.write_register(rd, rd_value >> shamt);
                 }
-                0b01 => {
-                    ctx.inst_name("C.XOR");
-                    // TODO
+                0b001 => {
+                    ctx.inst_name("C.SRAI");
+                    let shamt = extract_bits(code, 2..=6);
+                    ctx.write_register(rd, rd_value.signed() >> shamt);
                 }
-                0b10 => {
-                    ctx.inst_name("C.OR");
-                    // TODO
+                0b010 | 0b110 => {
+                    ctx.inst_name("C.ANDI");
+                    let imm = imm_ci(code);
+                    ctx.write_register(rd, rd_value & imm);
                 }
-                0b11 => {
-                    ctx.inst_name("C.AND");
-                    // TODO
+                0b011 => {
+                    let rs2 = crs2_(code);
+                    let a = rd_value;
+                    let b = ctx.read_register(rs2);
+
+                    match extract_bits(code, 5..=6) {
+                        0b00 => {
+                            ctx.inst_name("C.SUB");
+                            ctx.write_register(rd, a.wrapping_sub(b));
+                        }
+                        0b01 => {
+                            ctx.inst_name("C.XOR");
+                            ctx.write_register(rd, a ^ b);
+                        }
+                        0b10 => {
+                            ctx.inst_name("C.OR");
+                            ctx.write_register(rd, a | b);
+                        }
+                        0b11 => {
+                            ctx.inst_name("C.AND");
+                            ctx.write_register(rd, a & b);
+                        }
+                        _ => ctx.raise_exception(Exception::IllegalInstruction),
+                    }
                 }
                 _ => ctx.raise_exception(Exception::IllegalInstruction),
-            },
-            _ => ctx.raise_exception(Exception::IllegalInstruction),
-        },
+            }
+        }
 
         0b1100000000000001 => {
             ctx.inst_name("C.BEQZ");
-            // TODO
+            let rs1 = crs1_(code);
+            let taken = ctx.read_register(rs1) == 0;
+            let offset = imm_cb(code);
+            ctx.branch(taken, offset);
         }
         0b1110000000000001 => {
             ctx.inst_name("C.BNEZ");
-            // TODO
+            let rs1 = crs1_(code);
+            let taken = ctx.read_register(rs1) != 0;
+            let offset = imm_cb(code);
+            ctx.branch(taken, offset);
         }
 
-        0b0000000000000010 if code & (1 << 12) == 0 => {
-            ctx.inst_name("C.SLLI");
+        0b0000000000000010 if extract_bit(code, 12) == 0 => {
             // imm[5] (instr[12]) must be 0, else reserved NSE
-            // TODO
+            ctx.inst_name("C.SLLI");
+            let rd = crs1_(code);
+            let shamt = extract_bits(code, 2..=6);
+            let value = ctx.read_register(rd);
+            ctx.write_register(rd, value << shamt);
         }
 
-        0b1000000000000010 if code & (1 << 12) == 0 => {
-            ctx.inst_name("C.MV");
+        0b1000000000000010 if extract_bit(code, 12) == 0 => {
+            let rs2 = crs2(code);
+            let rs1 = crs1(code);
             // JR if rs2 == 0, if JR and rs1 == 0, reserved
-            // TODO
+            if rs2 == 0 {
+                ctx.inst_name("C.JR");
+                if rs1 == 0 {
+                    ctx.raise_exception(Exception::IllegalInstruction);
+                    return;
+                }
+
+                let new_pc = ctx.read_register(rs1) & !1; // clear LSB
+                ctx.set_absolute_pc_value(new_pc as u32);
+            } else {
+                ctx.inst_name("C.MV");
+                let value = ctx.read_register(rs2);
+                ctx.write_register(rs1, value);
+            }
         }
         0b1000000000000010 => {
-            // else
-            ctx.inst_name("C.MV");
-            // JALR if rs2 == 0
-            // EBREAK if !instr[11:2]
-            // TODO
+            // ADD
+            // JALR if !rs2
+            // EBREAK if !rs1 && !rs2
+            let rs1 = crs1(code); // rd
+            let rs2 = crs2(code);
+
+            if rs2 == 0 {
+                if rs1 == 0 {
+                    ctx.inst_name("C.EBREAK");
+                    ctx.set_cycles(3);
+                    ctx.raise_exception(Exception::BreakPoint);
+                } else {
+                    ctx.inst_name("C.JALR");
+                    let new_pc = ctx.read_register(rs1) & !1; // clear LSB
+                    ctx.write_register(1, ctx.get_pc() + 2);
+                    ctx.set_absolute_pc_value(new_pc as u32);
+                }
+            } else {
+                ctx.inst_name("C.ADD");
+                let a = ctx.read_register(rs1);
+                let b = ctx.read_register(rs2);
+                ctx.write_register(rs1, a.wrapping_add(b));
+            }
         }
 
         0b0100000000000010 => {
             ctx.inst_name("C.LWSP");
-            // TODO
+            let rd = crs1(code);
+            let address = ctx.read_register(2);
+            let offset = (extract_bit(code, 12) << 5)
+                + (extract_bits(code, 4..=6) << 2)
+                + (extract_bits(code, 2..=3) << 6);
+
+            ctx.load(rd, address.wrapping_add(offset as _), DataSize::Word, true);
         }
 
         0b1100000000000010 => {
             ctx.inst_name("C.SWSP");
-            // TODO
+            let rs2 = crs2(code);
+            let value = ctx.read_register(rs2);
+            let address = ctx.read_register(2);
+            let offset = (extract_bits(code, 9..=12) << 2) + (extract_bits(code, 7..=8) << 6);
+
+            ctx.store(address.wrapping_add(offset as _), value, DataSize::Word);
         }
 
         0b1000000000000000 => {
-            match (code >> 12) & 0b111 {
+            // load store
+            let rd = crs2_(code);
+            let rs1 = crs1_(code);
+            let addr = ctx.read_register(rs1);
+
+            match extract_bits(code, 10..=12) {
                 0b000 => {
                     ctx.inst_name("C.LBU");
-                    // TODO
+                    let offset = extract_bit(code, 6) + (extract_bit(code, 5) << 1);
+                    ctx.load(rd, addr.wrapping_add(offset as u32), DataSize::Byte, false);
                 }
                 0b001 if code & (1 << 6) == 0 => {
                     ctx.inst_name("C.LHU");
-                    // TODO
+                    let offset = extract_bit(code, 5) << 1;
+                    ctx.load(
+                        rd,
+                        addr.wrapping_add(offset as u32),
+                        DataSize::HalfWord,
+                        false,
+                    );
                 }
                 0b001 => {
                     // else
                     ctx.inst_name("C.LH");
-                    // TODO
+                    let offset = extract_bit(code, 5) << 1;
+                    ctx.load(
+                        rd,
+                        addr.wrapping_add(offset as u32),
+                        DataSize::HalfWord,
+                        true,
+                    );
                 }
                 0b010 => {
                     ctx.inst_name("C.SB");
-                    // TODO
+                    let offset = extract_bit(code, 6) + (extract_bit(code, 5) << 1);
+                    let value = ctx.read_register(rd);
+                    ctx.store(addr.wrapping_add(offset as u32), value, DataSize::Byte);
                 }
                 0b011 if code & (1 << 6) == 0 => {
                     ctx.inst_name("C.SH");
-                    // TODO
+                    let offset = extract_bit(code, 5) << 1;
+                    let value = ctx.read_register(rd);
+                    ctx.store(addr.wrapping_add(offset as u32), value, DataSize::HalfWord);
                 }
                 _ => ctx.raise_exception(Exception::IllegalInstruction),
             }
         }
 
-        0b1000000000000001 if (code >> 10) & 0b111 == 0b111 => {
+        0b1000000000000001 if extract_bits(code, 10..=12) == 0b111 => {
+            let rd = crs1_(code);
+            let value = ctx.read_register(rd);
+
             match (code >> 2) & 0b11111 {
                 0b11000 => {
                     ctx.inst_name("C.ZEXT.B");
-                    // TODO
+                    ctx.write_register(rd, value & 0xff);
                 }
                 0b11001 => {
                     ctx.inst_name("C.SEXT.B");
-                    // TODO
+                    ctx.write_register(rd, sign_extend(value, 7));
                 }
                 0b11010 => {
                     ctx.inst_name("C.ZEXT.H");
-                    // TODO
+                    ctx.write_register(rd, value & 0xffff);
                 }
                 0b11011 => {
                     ctx.inst_name("C.SEXT.H");
-                    // TODO
+                    ctx.write_register(rd, sign_extend(value, 15));
                 }
                 0b11101 => {
                     ctx.inst_name("C.NOT");
-                    // TODO
+                    ctx.write_register(rd, !value);
                 }
                 v if v >= 0b10000 && v < 0b11000 => {
                     ctx.inst_name("C.MUL");
-                    // TODO
+                    let rs2 = crs2_(code);
+                    let a = rd as u32;
+                    let b = ctx.read_register(rs2);
+                    ctx.write_register(rd, a.wrapping_mul(b));
                 }
                 _ => ctx.raise_exception(Exception::IllegalInstruction),
             }
         }
 
         0b1010000000000010 => {
-            if code & (1 << 13) == 0 {
+            if extract_bit(code, 12) == 0 {
+                let r1s = extract_bits(code, 7..=9) as Register;
+                let r2s = extract_bits(code, 2..=4) as Register;
+
+                if r1s == r2s {
+                    ctx.raise_exception(Exception::IllegalInstruction);
+                    return;
+                }
+
+                let xreg1 = zcmp_s_mapping(r1s);
+                let xreg2 = zcmp_s_mapping(r2s);
+
                 match code & 0b0000110001100000 {
                     0b110000100000 => {
                         ctx.inst_name("CM.MVSA01");
-                        // TODO
+                        ctx.add_zcmp_action(ZcmpAction::RegisterMove(10, xreg1));
+                        ctx.add_zcmp_action(ZcmpAction::RegisterMove(11, xreg2));
                     }
                     0b110001100000 => {
                         ctx.inst_name("CM.MVA01S");
-                        // TODO
+                        ctx.add_zcmp_action(ZcmpAction::RegisterMove(xreg1, 10));
+                        ctx.add_zcmp_action(ZcmpAction::RegisterMove(xreg2, 11));
                     }
                     _ => ctx.raise_exception(Exception::IllegalInstruction),
                 }
             } else {
-                match code & 0b0000111100000000 {
-                    0b100000000000 => {
+                match extract_bits(code, 8..=11) {
+                    0b1000 => {
                         ctx.inst_name("CM.PUSH");
-                        // TODO
+                        ctx.zcmp_stack_push(code);
                     }
-                    0b101000000000 => {
+                    0b1010 => {
                         ctx.inst_name("CM.POP");
-                        // TODO
+                        ctx.zcmp_stack_pop(code, false, false);
                     }
-                    0b110000000000 => {
+                    0b1100 => {
                         ctx.inst_name("CM.POPRETZ");
-                        // TODO
+                        ctx.zcmp_stack_pop(code, true, true);
                     }
-                    0b111000000000 => {
+                    0b1110 => {
                         ctx.inst_name("CM.POPRET");
-                        // TODO
+                        ctx.zcmp_stack_pop(code, true, false);
                     }
-                    _ => ctx.raise_exception(Exception::IllegalInstruction),
+                    _ => {
+                        ctx.raise_exception(Exception::IllegalInstruction);
+                        return;
+                    }
                 }
             }
         }
@@ -1030,14 +1295,14 @@ pub(super) fn exec_instruction(code: u32, ctx: &mut ExecContext<'_>) {
 
                 let op = IType::from(code);
                 let return_address = ctx.get_pc() + 4;
-                let offset = ctx
+                let jump_addr = ctx
                     .read_register(op.rs1)
                     .signed()
                     .wrapping_add(op.imm.signed())
                     & !1; // Clear the least significant bit
 
                 ctx.write_register(op.rd, return_address);
-                ctx.set_next_pc_offset(offset);
+                ctx.set_absolute_pc_value(jump_addr as u32);
             }
 
             OPCODE_LUI => {

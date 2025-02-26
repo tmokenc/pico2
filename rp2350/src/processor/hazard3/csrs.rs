@@ -287,43 +287,37 @@ impl Csrs {
                 if self.privilege_mode == PrivilegeMode::Machine || self.is_u_mode_cycle_enabled() {
                     self.mcycles as u32
                 } else {
-
-                0 // don't know if this is correct or should raise an exception
-
+                    0 // don't know if this is correct or should raise an exception
                 }
             }
 
             Self::INSTRET => {
-                if self.privilege_mode == PrivilegeMode::Machine || self.is_u_mode_instret_enabled() {
+                if self.privilege_mode == PrivilegeMode::Machine || self.is_u_mode_instret_enabled()
+                {
                     self.minstret as u32
                 } else {
-
-
-                0 // don't know if this is correct or should raise an exception
+                    0 // don't know if this is correct or should raise an exception
                 }
             }
 
             Self::CYCLEH => {
                 if self.privilege_mode == PrivilegeMode::Machine || self.is_u_mode_cycle_enabled() {
                     (self.mcycles >> 32) as u32
-                }  else {
-
-                0 // don't know if this is correct or should raise an exception
-
+                } else {
+                    0 // don't know if this is correct or should raise an exception
                 }
             }
 
             Self::INSTRETH => {
-                if self.privilege_mode == PrivilegeMode::Machine || self.is_u_mode_instret_enabled() {
+                if self.privilege_mode == PrivilegeMode::Machine || self.is_u_mode_instret_enabled()
+                {
                     (self.minstret >> 32) as u32
                 } else {
-
-                0 // don't know if this is correct or should raise an exception
-
+                    0 // don't know if this is correct or should raise an exception
                 }
             }
 
-            Self::MENVCFG 
+            Self::MENVCFG
             | Self::MENVCFGH
             | Self::MSTATUSH
             | Self::MHPMEVENT3..=Self::MHPMEVENT31
@@ -333,7 +327,7 @@ impl Csrs {
             | Self::PMPADDR11..=Self::PMPADDR15
             | Self::MCONFIGPTR => 0, // hardwired to 0
 
-                // Unimplemented CSR
+            // Unimplemented CSR
             _ => return Err(Exception::IllegalInstruction),
         };
 
