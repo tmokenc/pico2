@@ -1,6 +1,6 @@
 #[derive(Default)]
 pub struct RiscVPlatformTimer {
-    timer: u32
+    timer: u32,
 }
 
 impl RiscVPlatformTimer {
