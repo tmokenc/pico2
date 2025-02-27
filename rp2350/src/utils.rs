@@ -1,5 +1,18 @@
-use core::ops::{Add, BitAnd, RangeInclusive, Shl, Shr};
+//! Utility functions and data structures for the emulator.
+
+pub mod fifo;
+
+pub use fifo::{Fifo, FifoError};
+
 use num_traits::{AsPrimitive, PrimInt};
+
+pub fn extract_bit<T>(bits: T, bit: T) -> T
+where
+    T: PrimInt + AsPrimitive<u32> + Copy, // Ensures integer traits and conversion to u32
+    u32: AsPrimitive<T>,                  // Allows conversion from u32 back to T
+{
+    extract_bits(bits, bit..=bit)
+}
 
 pub fn extract_bits<T>(bits: T, range: std::ops::RangeInclusive<T>) -> T
 where

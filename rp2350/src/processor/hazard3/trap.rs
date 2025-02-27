@@ -1,3 +1,6 @@
+use crate::interrupts::*;
+
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub(super) enum Exception {
     InstructionAlignment = 0x0,
     InstructionFetchFault = 0x1,
@@ -11,11 +14,7 @@ pub(super) enum Exception {
     EcallMMode = 0x9,
 }
 
-pub(super) enum Interrupt {
-    Exhausive,
-    // TODO
-}
-
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub(super) enum Trap {
     Exception(Exception),
     Interrupt(Interrupt),

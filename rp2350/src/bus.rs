@@ -11,6 +11,7 @@ use std::rc::Rc;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BusError {
     BusFault,
+    ConcurrentAccess,
     LoadError,
     StoreError,
 }
@@ -20,6 +21,8 @@ pub struct BusAccessContext {
     pub secure: bool,
     pub requestor: Requestor,
     pub size: DataSize,
+    pub signed: bool,
+    pub exclusive: bool,
     pub architecture: ArchitectureType,
 }
 
@@ -33,21 +36,23 @@ impl From<crate::memory::MemoryOutOfBoundsError> for BusError {
 
 /// Status of a load transaction
 /// this will be wrapped in a RC<RefCell<>> to allow for mutable access to the status
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LoadStatus {
     #[default]
     Waiting,
     Done(u32),
+    ExclusiveDone(u32), // exclusive access
     Error(BusError),
 }
 
 /// Status of a store transaction
 /// this will be wrapped in a RC<RefCell<>> to allow for mutable access to the status
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StoreStatus {
     #[default]
     Waiting,
     Done,
+    ExclusiveDone, // exclusive access
     Error(BusError),
 }
 
@@ -74,7 +79,7 @@ pub struct Bus {
     // APB peripherals
     sysinfo: UnimplementedPeripheral,
     syscfg: UnimplementedPeripheral,
-    clocks: UnimplementedPeripheral,
+    clocks: Clocks,
     psm: UnimplementedPeripheral,
     resets: UnimplementedPeripheral,
     io_bank0: UnimplementedPeripheral,
@@ -86,7 +91,7 @@ pub struct Bus {
     pll_usb: UnimplementedPeripheral,
     accessctrl: UnimplementedPeripheral,
     busctrl: BusCtrl,
-    uart: [UnimplementedPeripheral; 2],
+    uart: [Uart; 2],
     spi: [UnimplementedPeripheral; 2],
     i2c: [UnimplementedPeripheral; 2],
     adc: UnimplementedPeripheral,
@@ -132,6 +137,10 @@ pub struct Bus {
     dma_access: Option<Status>,
     core0_access: Option<Status>,
     core1_access: Option<Status>,
+
+    core0_exclusive: Option<u32>, // address
+    core1_exclusive: Option<u32>, // address
+    dma_exclusive: Option<u32>,   // ?? not sure if this is needed, added just in case
 }
 
 impl Bus {
@@ -145,7 +154,9 @@ impl Bus {
     pub const CORTEX_M33_PRIVATE_REGISTERS: u32 = 0xe0000000;
 
     pub fn new() -> Self {
-        Self::default()
+        let mut result = Self::default();
+        result.set_rom(*include_bytes!("../bootrom-combined.bin"));
+        result
     }
 
     pub fn set_rom(&mut self, data: [u8; 32 * KB]) {
@@ -179,17 +190,27 @@ impl Bus {
         match status.status {
             StatusType::Load(load_status) => {
                 let result = match status.ctx.size {
-                    DataSize::Byte => self
-                        .read_u8(status.address, &status.ctx)
-                        .map(|v| sign_extend(v as u32, 7)),
-                    DataSize::HalfWord => self
-                        .read_u16(status.address, &status.ctx)
-                        .map(|v| sign_extend(v as u32, 15)),
+                    DataSize::Byte => self.read_u8(status.address, &status.ctx).map(|v| {
+                        if status.ctx.signed {
+                            sign_extend(v as u32, 7)
+                        } else {
+                            v as u32
+                        }
+                    }),
+                    DataSize::HalfWord => self.read_u16(status.address, &status.ctx).map(|v| {
+                        if status.ctx.signed {
+                            sign_extend(v as u32, 15)
+                        } else {
+                            v as u32
+                        }
+                    }),
                     DataSize::Word => self.read_u32(status.address, &status.ctx),
                 };
 
                 *load_status.borrow_mut() = match result {
+                    Ok(v) if status.ctx.exclusive => LoadStatus::ExclusiveDone(v),
                     Ok(v) => LoadStatus::Done(v),
+                    Err(BusError::ConcurrentAccess) => LoadStatus::Waiting,
                     Err(_e) => LoadStatus::Error(BusError::LoadError),
                 };
             }
@@ -201,7 +222,9 @@ impl Bus {
                     DataSize::Word => self.write_u32(status.address, value, &status.ctx),
                 };
                 *store_status.borrow_mut() = match result {
+                    Ok(_) if status.ctx.exclusive => StoreStatus::ExclusiveDone,
                     Ok(_) => StoreStatus::Done,
+                    Err(BusError::ConcurrentAccess) => StoreStatus::Waiting,
                     Err(_e) => StoreStatus::Error(BusError::StoreError),
                 };
             }
@@ -295,7 +318,14 @@ impl Bus {
         ctx: &BusAccessContext,
     ) -> BusResult<Option<&dyn Peripheral>> {
         // Rough address decode is first performed on bits 31:28 of the address
-        let result: &dyn Peripheral = match address & 0xF000_0000 {
+        let base_address = address & 0xF000_0000;
+
+        if ctx.exclusive && base_address != Self::SRAM {
+            // Exclusive access is only allowed for SRAM
+            return Err(BusError::BusFault);
+        }
+
+        let result: &dyn Peripheral = match base_address {
             // base address
             Self::ROM | Self::SRAM | Self::XIP => return Ok(None),
             Self::ABP => match address & 0xFFFF_F000 {
@@ -474,7 +504,46 @@ impl Bus {
         Ok(Some(result))
     }
 
-    fn read_u32(&self, address: u32, ctx: &BusAccessContext) -> BusResult<u32> {
+    // Check if the address is free for access
+    // This hold the assumption that the exclusive access
+    // is done in the sequence of read -> modify -> write
+    fn is_address_free(&self, address: u32, ctx: &BusAccessContext) -> bool {
+        match ctx.requestor {
+            Requestor::Proc0 => self
+                .core1_exclusive
+                .filter(|addr| *addr == address)
+                .or_else(|| self.dma_exclusive)
+                .filter(|addr| *addr == address)
+                .is_none(),
+            Requestor::Proc1 => self
+                .core0_exclusive
+                .filter(|addr| *addr == address)
+                .or_else(|| self.dma_exclusive)
+                .filter(|addr| *addr == address)
+                .is_none(),
+            Requestor::DmaR | Requestor::DmaW => self
+                .core0_exclusive
+                .filter(|addr| *addr == address)
+                .or_else(|| self.core1_exclusive)
+                .filter(|addr| *addr == address)
+                .is_none(),
+        }
+    }
+
+    fn read_u32(&mut self, address: u32, ctx: &BusAccessContext) -> BusResult<u32> {
+        if !self.is_address_free(address, ctx) {
+            return Err(BusError::ConcurrentAccess);
+        }
+
+        // Exclusive read will lock the address for that requestor
+        if ctx.exclusive {
+            match ctx.requestor {
+                Requestor::Proc0 => self.core0_exclusive = Some(address),
+                Requestor::Proc1 => self.core1_exclusive = Some(address),
+                Requestor::DmaR | Requestor::DmaW => self.dma_exclusive = Some(address),
+            }
+        }
+
         match address & 0xF000_0000 {
             Self::ROM => Ok(self.rom.read_u32(address)?),
             Self::SRAM => Ok(self.sram.read_u32(address - Self::SRAM)?),
@@ -493,6 +562,20 @@ impl Bus {
     }
 
     fn write_u32(&mut self, address: u32, value: u32, ctx: &BusAccessContext) -> BusResult<()> {
+        if !self.is_address_free(address, ctx) {
+            return Err(BusError::ConcurrentAccess);
+        }
+
+        // Exclusive write will unlock the address of that requestor
+        // normal write will not unlock the address even if exclusive is set for that address
+        if ctx.exclusive {
+            match ctx.requestor {
+                Requestor::Proc0 => self.core0_exclusive = None,
+                Requestor::Proc1 => self.core1_exclusive = None,
+                Requestor::DmaR | Requestor::DmaW => self.dma_exclusive = None,
+            }
+        }
+
         match address & 0xF000_0000 {
             Self::ROM => self.rom.write_u32(address, value)?,
             Self::SRAM => self.sram.write_u32(address - Self::SRAM, value)?,
@@ -512,7 +595,7 @@ impl Bus {
         Ok(())
     }
 
-    fn read_u16(&self, address: u32, ctx: &BusAccessContext) -> BusResult<u16> {
+    fn read_u16(&mut self, address: u32, ctx: &BusAccessContext) -> BusResult<u16> {
         match address & 0xF000_0000 {
             Self::ROM => Ok(self.rom.read_u16(address)?),
             Self::SRAM => Ok(self.sram.read_u16(address - Self::SRAM)?),
@@ -547,7 +630,7 @@ impl Bus {
         Ok(())
     }
 
-    fn read_u8(&self, address: u32, ctx: &BusAccessContext) -> BusResult<u8> {
+    fn read_u8(&mut self, address: u32, ctx: &BusAccessContext) -> BusResult<u8> {
         match address & 0xF000_0000 {
             Self::ROM => Ok(self.rom.read_u8(address)?),
             Self::SRAM => Ok(self.sram.read_u8(address - Self::SRAM)?),

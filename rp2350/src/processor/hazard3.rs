@@ -6,11 +6,12 @@ pub(crate) mod registers;
 pub(crate) mod trap;
 
 use super::{CpuArchitecture, ProcessorContext, Stats};
-use crate::bus::{LoadStatus, StoreStatus};
+use crate::bus::{BusAccessContext, LoadStatus, StoreStatus};
+use crate::common::*;
 use core::mem;
 use csrs::Csrs;
 pub use csrs::PrivilegeMode;
-use exec::{exec_instruction, ExecContext, MemoryAccess};
+use exec::*;
 use instruction_format::*;
 pub use registers::*;
 use std::cell::RefCell;
@@ -20,26 +21,79 @@ use trap::*;
 
 type RegisterWrite = (Register, u32);
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(crate) enum State {
     Wfi,
     Stall(u8, RegisterWrite),
     BusWaitLoad(Register, Rc<RefCell<LoadStatus>>),
     BusWaitStore(Rc<RefCell<StoreStatus>>),
+
+    // Atomic instructions
+    Atomic {
+        rd: Register,
+        bus_state: Rc<RefCell<LoadStatus>>,
+        address: u32,
+        value: u32,
+        op: AtomicOp,
+    },
+
+    // Zcmp instructions
+    Sequence(InstructionSequence),
     #[default]
     Normal,
 }
 
-#[derive(Default)]
+impl PartialEq for State {
+    // Just need to compare the variant, not the contents
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (State::Wfi, State::Wfi) => true,
+            (State::Stall(_, _), State::Stall(_, _)) => true,
+            (State::BusWaitLoad(_, _), State::BusWaitLoad(_, _)) => true,
+            (State::BusWaitStore(_), State::BusWaitStore(_)) => true,
+            (State::Atomic { .. }, State::Atomic { .. }) => true,
+            (State::Sequence(_), State::Sequence(_)) => true,
+            (State::Normal, State::Normal) => true,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for State {}
+
 pub struct Hazard3 {
     pub(self) pc: u32,
     pub(self) state: State,
     pub(self) registers: Registers,
-    pub(self) privilege_mode: PrivilegeMode,
-    pub(self) monitor: bool,
     pub(self) csrs: Csrs,
     pub(self) xx_bypass: Option<RegisterWrite>,
+    // for atomic instructions
+    // should be clear after any atomic instruction, or SC.W or getting a trap
+    pub(self) local_monitor_bit: bool,
+
+    // Zcmp extension
+    // Some instructions may expand into a sequence of multiple instructions
+    pub(self) inst_seq: InstructionSequence,
+
+    // for debugging
+    pub(self) monitor: bool,
     pub count_instructions: Option<HashMap<&'static str, u32>>,
+}
+
+impl Default for Hazard3 {
+    fn default() -> Self {
+        Self {
+            pc: 0x6aac, // or 0x6a2c
+            state: State::default(),
+            registers: Registers::default(),
+            csrs: Csrs::default(),
+            xx_bypass: None,
+            local_monitor_bit: false,
+            monitor: false,
+            inst_seq: InstructionSequence::default(),
+            count_instructions: None,
+        }
+    }
 }
 
 impl CpuArchitecture for Hazard3 {
@@ -63,88 +117,81 @@ impl CpuArchitecture for Hazard3 {
             self.registers.write(rd, value);
         }
 
-        match mem::take(&mut self.state) {
-            State::Stall(cycles, reg_write) => {
-                if cycles == 1 {
-                    self.xx_bypass = Some(reg_write);
-                } else {
-                    self.state = State::Stall(cycles - 1, reg_write);
-                }
-            }
-            State::BusWaitLoad(rd, load_status) => match *load_status.clone().borrow() {
-                LoadStatus::Waiting => self.state = State::BusWaitLoad(rd, load_status),
-                LoadStatus::Done(value) => {
-                    self.registers.write(rd, value);
-                }
+        self.update_state(ctx);
 
-                LoadStatus::Error(e) => {
-                    log::warn!("Load error: {:?}", e);
-                    self.trap_handle(Exception::LoadFault);
-                }
-            },
-            State::BusWaitStore(store_status) => match *store_status.clone().borrow() {
-                StoreStatus::Waiting => self.state = State::BusWaitStore(store_status),
-                StoreStatus::Done => (),
-                StoreStatus::Error(e) => {
-                    log::warn!("Store error: {:?}", e);
-                    self.trap_handle(Exception::StoreFault);
-                }
-            },
-            State::Normal => {
-                let Ok(inst_code) = ctx.bus.fetch(self.pc) else {
-                    self.trap_handle(Exception::InstructionFetchFault);
-                    return;
-                };
+        if self.state != State::Normal {
+            // The processor is in a state where it is waiting for something
+            self.csrs.tick();
+            return;
+        }
 
-                let mut exec_ctx = ExecContext::new(self, ctx.bus);
-                exec_instruction(inst_code, &mut exec_ctx);
+        if !self.inst_seq.is_empty() {
+            // Execute the next instruction in the sequence
+            self.exec_next_instruction_sequence(ctx);
+            self.csrs.tick();
+            return;
+        }
 
-                let ExecContext {
-                    exception,
-                    register_write,
-                    memory_access,
-                    next_pc_offset,
-                    cycles,
-                    instruction_name,
-                    ..
-                } = exec_ctx;
-
-                if self.monitor {
-                    self.instruction_log(inst_code, instruction_name);
-                }
-
-                self.csrs.tick();
-
-                if let Some(exception) = exception {
-                    self.trap_handle(exception);
-                } else {
-                    self.pc = (self.pc as i32).wrapping_add(next_pc_offset) as u32;
-                }
-
-                if let Some(write) = register_write {
-                    self.state = State::Stall(cycles, write);
-                }
-
-                match memory_access {
-                    MemoryAccess::Load(reg, status) => {
-                        self.state = State::BusWaitLoad(reg, status);
-                    }
-                    MemoryAccess::Store(status) => {
-                        self.state = State::BusWaitStore(status);
-                    }
-                    MemoryAccess::None => (),
-                }
-
-                // due to the way CSRs are handled differently here
-                return;
-            }
-            State::Wfi => {
-                // TODO
-                self.state = State::Wfi;
-            }
+        let Ok(inst_code) = ctx.bus.fetch(self.pc) else {
+            log::warn!("Instruction fetch fault at 0x{:08x}", self.pc);
+            self.trap_handle(Exception::InstructionFetchFault);
+            return;
         };
 
+        let mut exec_ctx = ExecContext::new(self, ctx.bus);
+        exec_instruction(inst_code, &mut exec_ctx);
+
+        let ExecContext {
+            exception,
+            register_write,
+            memory_access,
+            next_pc_offset,
+            cycles,
+            zcmp_actions,
+            instruction_name,
+            ..
+        } = exec_ctx;
+
+        if self.monitor {
+            self.instruction_log(inst_code, instruction_name);
+        }
+
         self.csrs.tick();
+
+        if let Some(exception) = exception {
+            return self.trap_handle(exception);
+        } else {
+            self.pc = (self.pc as i32).wrapping_add(next_pc_offset) as u32;
+        }
+
+        if let Some(write) = register_write {
+            self.state = State::Stall(cycles, write);
+        }
+
+        match memory_access {
+            MemoryAccess::Load(reg, status) => {
+                self.state = State::BusWaitLoad(reg, status);
+            }
+            MemoryAccess::Store(status) => {
+                self.state = State::BusWaitStore(status);
+            }
+            MemoryAccess::Atomic {
+                rd,
+                bus_state,
+                address,
+                value,
+                op,
+            } => {
+                self.state = State::Atomic {
+                    rd,
+                    bus_state,
+                    address,
+                    value,
+                    op,
+                };
+            }
+            MemoryAccess::None => (),
+        }
     }
 
     fn stats(&self) -> &Stats {
@@ -165,6 +212,209 @@ impl Hazard3 {
     ///    8. Jump to the correct offset from MTVEC depending on the trap cause
     fn trap_handle(&mut self, trap: impl Into<Trap>) {
         todo!()
+    }
+
+    fn update_state(&mut self, ctx: &mut ProcessorContext) {
+        match mem::take(&mut self.state) {
+            State::Stall(cycles, reg_write) => {
+                if cycles == 1 {
+                    self.xx_bypass = Some(reg_write);
+                } else {
+                    self.state = State::Stall(cycles - 1, reg_write);
+                }
+            }
+            State::BusWaitLoad(rd, load_status) => match *load_status.clone().borrow() {
+                LoadStatus::Waiting => self.state = State::BusWaitLoad(rd, load_status),
+                LoadStatus::Done(value) => {
+                    self.registers.write(rd, value);
+                }
+
+                LoadStatus::ExclusiveDone(value) => {
+                    // successful claim the exclusive access to the address
+                    self.registers.write(rd, value);
+                    self.local_monitor_bit = true;
+                }
+
+                LoadStatus::Error(e) => {
+                    log::warn!("Load error: {:?}", e);
+                    self.trap_handle(Exception::LoadFault);
+                    return;
+                }
+            },
+            State::BusWaitStore(store_status) => match *store_status.clone().borrow() {
+                StoreStatus::Waiting => self.state = State::BusWaitStore(store_status),
+                StoreStatus::Done => (),
+                StoreStatus::ExclusiveDone => {
+                    // Unblock the exclusive access to the address
+                    self.local_monitor_bit = false;
+                }
+                StoreStatus::Error(e) => {
+                    log::warn!("Store error: {:?}", e);
+                    self.trap_handle(Exception::StoreFault);
+                    return;
+                }
+            },
+            State::Wfi => {
+                // TODO
+                self.state = State::Wfi;
+            }
+
+            State::Sequence(seq) => self.inst_seq = seq,
+
+            State::Atomic {
+                rd,
+                bus_state,
+                address,
+                value,
+                op,
+            } => match *bus_state.clone().borrow() {
+                LoadStatus::Waiting => {
+                    self.state = State::Atomic {
+                        rd,
+                        bus_state,
+                        address,
+                        value,
+                        op,
+                    };
+                }
+                LoadStatus::ExclusiveDone(read_value) => {
+                    let new_value = match op {
+                        AtomicOp::Add => read_value.wrapping_add(value),
+                        AtomicOp::And => read_value & value,
+                        AtomicOp::Or => read_value | value,
+                        AtomicOp::Xor => read_value ^ value,
+                        AtomicOp::Swap => value,
+                        AtomicOp::Min => read_value.signed().min(value.signed()) as u32,
+                        AtomicOp::Max => read_value.signed().max(value.signed()) as u32,
+                        AtomicOp::MinU => read_value.min(value),
+                        AtomicOp::MaxU => read_value.max(value),
+                    };
+
+                    let store_status = ctx.bus.store(
+                        address,
+                        new_value,
+                        BusAccessContext {
+                            size: DataSize::Word,
+                            exclusive: true,
+                            signed: false,
+                            secure: self.csrs.privilege_mode() == PrivilegeMode::Machine,
+                            architecture: ArchitectureType::Hazard3,
+                            requestor: match self.csrs.core_id {
+                                0 => Requestor::Proc0,
+                                1 => Requestor::Proc1,
+                                _ => unreachable!(),
+                            },
+                        },
+                    );
+
+                    self.local_monitor_bit = true;
+
+                    match store_status {
+                        Ok(status) => {
+                            self.registers.write(rd, read_value);
+                            self.state = State::BusWaitStore(status);
+                        }
+                        Err(e) => {
+                            log::warn!("Store error: {:?}", e);
+                            self.trap_handle(Exception::StoreFault);
+                            return;
+                        }
+                    }
+                }
+                LoadStatus::Error(e) => {
+                    log::warn!("Load error: {:?}", e);
+                    self.trap_handle(Exception::LoadFault);
+                    return;
+                }
+                LoadStatus::Done(_) => unreachable!(),
+            },
+            State::Normal => {}
+        };
+    }
+
+    fn exec_next_instruction_sequence(&mut self, ctx: &mut ProcessorContext) {
+        // TODO: Is the timing of these actions correct?
+        // The sequence is guaranteed to be non-empty
+        match self.inst_seq.pop().unwrap() {
+            ZcmpAction::RegisterUpdate(rd, val) => {
+                self.registers.write(rd, val);
+            }
+            ZcmpAction::RegisterMove(from, to) => {
+                let val = self.registers.read(from);
+                self.registers.write(to, val);
+            }
+            ZcmpAction::Store {
+                address,
+                from_register,
+            } => {
+                let value = self.registers.read(from_register);
+                let store_status = ctx.bus.store(
+                    address,
+                    value,
+                    BusAccessContext {
+                        size: DataSize::Word,
+                        exclusive: false,
+                        signed: false,
+                        secure: self.csrs.privilege_mode() == PrivilegeMode::Machine,
+                        architecture: ArchitectureType::Hazard3,
+                        requestor: match self.csrs.core_id {
+                            0 => Requestor::Proc0,
+                            1 => Requestor::Proc1,
+                            _ => unreachable!(),
+                        },
+                    },
+                );
+
+                match store_status {
+                    Ok(status) => {
+                        self.state = State::BusWaitStore(status);
+                    }
+                    Err(e) => {
+                        log::warn!("Store error: {:?}", e);
+                        self.trap_handle(Exception::StoreFault);
+                        return;
+                    }
+                }
+            }
+
+            ZcmpAction::Load {
+                address,
+                to_register,
+            } => {
+                let load_status = ctx.bus.load(
+                    address,
+                    BusAccessContext {
+                        size: DataSize::Word,
+                        exclusive: false,
+                        signed: false,
+                        secure: self.csrs.privilege_mode() == PrivilegeMode::Machine,
+                        architecture: ArchitectureType::Hazard3,
+                        requestor: match self.csrs.core_id {
+                            0 => Requestor::Proc0,
+                            1 => Requestor::Proc1,
+                            _ => unreachable!(),
+                        },
+                    },
+                );
+
+                match load_status {
+                    Ok(status) => {
+                        self.state = State::BusWaitLoad(to_register, status);
+                    }
+                    Err(e) => {
+                        log::warn!("Load error: {:?}", e);
+                        self.trap_handle(Exception::LoadFault);
+                        return;
+                    }
+                }
+            }
+
+            ZcmpAction::Return => {
+                // RET = JALR x0, 0(x1)
+                let return_address = self.registers.read(1);
+                self.pc = return_address;
+            }
+        }
     }
 
     pub(self) fn instruction_log(&mut self, inst_code: u32, name: &'static str) {

@@ -34,13 +34,30 @@ const fn func7(code: u32) -> u32 {
     code >> 25 & 0b1111111
 }
 
-type AtomicOp = fn(u32, u32) -> u32;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AtomicOp {
+    Add,
+    And,
+    Or,
+    Xor,
+    Swap,
+    Min,
+    Max,
+    MinU,
+    MaxU,
+}
 
 pub(super) enum MemoryAccess {
     Load(Register, Rc<RefCell<LoadStatus>>),
     Store(Rc<RefCell<StoreStatus>>),
+    Atomic {
+        address: u32,
+        rd: Register,
+        bus_state: Rc<RefCell<LoadStatus>>,
+        value: u32,
+        op: AtomicOp,
+    },
     None,
-    // TODO Atomic
 }
 
 pub(super) type InstructionSequence = Fifo<ZcmpAction, 32>;
@@ -119,7 +136,56 @@ impl ExecContext<'_> {
         self.core.csrs.write(csr.as_(), value.as_())
     }
 
-    fn load(&mut self, rd: Register, address: impl AsPrimitive<u32>, size: DataSize, signed: bool) {
+    fn atomic_access(
+        &mut self,
+        rd: Register,
+        address: impl AsPrimitive<u32>,
+        value: u32,
+        op: AtomicOp,
+    ) {
+        let address: u32 = address.as_();
+        if !is_address_aligned(address, DataSize::Word) {
+            self.raise_exception(Exception::LoadAlignment);
+            return;
+        }
+
+        let bus_ctx = BusAccessContext {
+            size: DataSize::Word,
+            signed: false,
+            exclusive: true,
+            secure: self.privilege_mode() == PrivilegeMode::Machine,
+            architecture: ArchitectureType::Hazard3,
+            requestor: match self.core.csrs.core_id {
+                0 => Requestor::Proc0,
+                1 => Requestor::Proc1,
+                _ => unreachable!(),
+            },
+        };
+
+        match self.bus.load(address, bus_ctx) {
+            Ok(status) => {
+                self.memory_access = MemoryAccess::Atomic {
+                    address,
+                    rd,
+                    bus_state: status,
+                    value,
+                    op,
+                }
+            }
+            Err(_e) => {
+                self.raise_exception(Exception::LoadFault);
+            }
+        }
+    }
+
+    fn _load(
+        &mut self,
+        rd: Register,
+        address: impl AsPrimitive<u32>,
+        size: DataSize,
+        signed: bool,
+        exclusive: bool,
+    ) {
         if !is_address_aligned(address.as_(), size) {
             self.raise_exception(Exception::LoadAlignment);
             return;
@@ -128,6 +194,7 @@ impl ExecContext<'_> {
         let bus_ctx = BusAccessContext {
             size,
             signed,
+            exclusive,
             secure: self.privilege_mode() == PrivilegeMode::Machine,
             architecture: ArchitectureType::Hazard3,
             requestor: match self.core.csrs.core_id {
@@ -145,7 +212,15 @@ impl ExecContext<'_> {
         }
     }
 
-    fn store(&mut self, address: u32, value: u32, size: DataSize) {
+    fn load(&mut self, rd: Register, address: impl AsPrimitive<u32>, size: DataSize, signed: bool) {
+        self._load(rd, address, size, signed, false);
+    }
+
+    fn load_exclusive(&mut self, rd: Register, address: impl AsPrimitive<u32>) {
+        self._load(rd, address, DataSize::Word, false, true);
+    }
+
+    fn _store(&mut self, address: u32, value: u32, size: DataSize, exclusive: bool) {
         if !is_address_aligned(address, size) {
             self.raise_exception(Exception::StoreAlignment);
             return;
@@ -154,6 +229,7 @@ impl ExecContext<'_> {
         let bus_ctx = BusAccessContext {
             size,
             signed: false,
+            exclusive,
             secure: self.privilege_mode() == PrivilegeMode::Machine,
             architecture: ArchitectureType::Hazard3,
             requestor: match self.core.csrs.core_id {
@@ -167,6 +243,14 @@ impl ExecContext<'_> {
             Ok(status) => self.memory_access = MemoryAccess::Store(status),
             Err(_e) => self.raise_exception(Exception::StoreFault),
         }
+    }
+
+    fn store(&mut self, address: u32, value: u32, size: DataSize) {
+        self._store(address, value, size, false);
+    }
+
+    fn store_exclusive(&mut self, address: u32, value: u32) {
+        self._store(address, value, DataSize::Word, true);
     }
 
     fn get_pc(&self) -> u32 {
@@ -837,67 +921,72 @@ fn exec_atomic_instruction(code: u32, ctx: &mut ExecContext) {
 
     let RType { rd, rs1, rs2 } = code.into();
     let func5 = code >> 27;
-    let ordering = code >> 25 & 0b11;
+    let _ordering = code >> 25 & 0b11; // TODO correctly handle memory ordering
 
     match func5 {
         0b00010 if rs2 == 0 => {
             ctx.inst_name("LR.W");
-            // TODO
+            let address = ctx.read_register(rs1);
+            ctx.load_exclusive(rd, address);
             return;
         }
         0b00011 => {
             ctx.inst_name("SC.W");
-            // TODO
+            let address = ctx.read_register(rs1);
+            let value = ctx.read_register(rs2);
+            ctx.store_exclusive(address, value);
             return;
         }
         _ => {}
     }
 
-    let a = ctx.read_register(rs1);
-    let b = ctx.read_register(rs2);
+    let address = ctx.read_register(rs1);
+    let value = ctx.read_register(rs2);
 
-    match func5 {
+    let op = match func5 {
         0b00001 => {
             ctx.inst_name("AMOSWAP.W");
-            // TODO
+            AtomicOp::Swap
         }
         0b00000 => {
             ctx.inst_name("AMOADD.W");
-            // TODO
+            AtomicOp::Add
         }
         0b00100 => {
             ctx.inst_name("AMOXOR.W");
-            // TODO
+            AtomicOp::Xor
         }
         0b01100 => {
             ctx.inst_name("AMOAND.W");
-            // TODO
+            AtomicOp::And
         }
         0b01000 => {
             ctx.inst_name("AMOOR.W");
-            // TODO
+            AtomicOp::Or
         }
         0b10000 => {
             ctx.inst_name("AMOMIN.W");
-            // TODO
+            AtomicOp::Min
         }
         0b10100 => {
             ctx.inst_name("AMOMAX.W");
-            // TODO
+            AtomicOp::Max
         }
         0b11000 => {
             ctx.inst_name("AMOMINU.W");
-            // TODO
+            AtomicOp::MinU
         }
         0b11100 => {
             ctx.inst_name("AMOMAXU.W");
-            // TODO
+            AtomicOp::MaxU
         }
         _ => {
             ctx.raise_exception(Exception::IllegalInstruction);
             return;
         }
     };
+
+    ctx.atomic_access(rd, address, value, op);
 }
 
 #[inline]
