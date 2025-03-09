@@ -81,7 +81,7 @@ pub(super) enum ZcmpAction {
 
 pub(super) struct ExecContext<'a> {
     pub(super) cycles: u8,
-    pub(super) next_pc_offset: i32,
+    pub(super) next_pc: u32,
     pub(super) register_read: Option<Register>,
     pub(super) register_write: Option<(Register, u32)>,
     pub(super) exception: Option<Exception>,
@@ -101,7 +101,7 @@ impl ExecContext<'_> {
             register_write: None,
             exception: None,
             instruction_name: "Unknown",
-            next_pc_offset: 0,
+            next_pc: 0,
             memory_access: MemoryAccess::None,
             zcmp_actions: Fifo::default(),
             mret: false,
@@ -258,11 +258,11 @@ impl ExecContext<'_> {
     }
 
     fn set_next_pc_offset(&mut self, offset: impl AsPrimitive<i32>) {
-        self.next_pc_offset = offset.as_();
+        self.next_pc = (self.core.pc as i32).wrapping_add(offset.as_()).as_();
     }
 
     fn set_absolute_pc_value(&mut self, value: u32) {
-        self.next_pc_offset = value.wrapping_sub(self.core.pc) as i32;
+        self.next_pc = value;
     }
 
     fn raise_exception(&mut self, exception: Exception) {
@@ -276,7 +276,7 @@ impl ExecContext<'_> {
     fn branch(&mut self, taken: bool, label: impl AsPrimitive<i32>) {
         // TODO branch prediction
         if taken {
-            self.next_pc_offset = label.as_();
+            self.set_next_pc_offset(label);
         }
     }
 
@@ -389,15 +389,29 @@ fn exec_system_instruction(code: u32, ctx: &mut ExecContext) {
                 return;
             }
 
-            ctx.mret();
+            let next_pc = ctx.core.csrs.trap_mret();
+            ctx.set_absolute_pc_value(next_pc);
+            ctx.set_cycles(2);
         }
         0b00010000010100000000000001110011 => {
             ctx.inst_name("WFI");
             if ctx.privilege_mode() != PrivilegeMode::Machine {
-                // TODO check for MSTATUS.TV is clear or not (must be cleared)
+                // check for MSTATUS.TV is clear or not (must be cleared)
+                if ctx.core.csrs.mstatus & super::csrs::MSTATUS_TW != 0 {
+                    ctx.raise_exception(Exception::IllegalInstruction);
+                    return;
+                }
             }
+
+            //If MIP.MEIP is 1, MIE.MEIE is 1, and MSTATUS.MIE is 0, a wfi instruction falls through immediately without pausing.
+            if ctx.core.csrs.mip & super::csrs::MIP_MEIP != 0
+                && ctx.core.csrs.mie & super::csrs::MIE_MEIE != 0
+                && ctx.core.csrs.mstatus & super::csrs::MSTATUS_MIE == 0
+            {
+                return;
+            }
+
             ctx.wfi();
-            // TODO
         }
         _ => {
             let IType { rd, rs1, imm } = code.into();
@@ -1419,6 +1433,14 @@ pub(super) fn exec_instruction(code: u32, ctx: &mut ExecContext<'_>) {
                 ctx.inst_name("FENCE.I");
                 // Do nothing
             }
+            _ if code == 0b00000000000000000010000000110011 => {
+                ctx.inst_name("_H3.BLOCK");
+                ctx.core.sleep_state.sleep();
+            }
+            _ if code == 0b00000000000100000010000000110011 => {
+                ctx.inst_name("_H3.UNBLOCK");
+                ctx.core.opposite_sleep_state.wake();
+            }
             _ if extract_bits(code, 0..=19) == 0b00000000000000001111 => {
                 ctx.inst_name("FENCE");
                 // Do nothing
@@ -1558,9 +1580,9 @@ mod tests {
                         exec_instruction(instr, &mut ctx);
 
                         if $expected {
-                            assert_eq!(ctx.next_pc_offset, offset);
+                            assert_eq!(ctx.next_pc, PC + offset);
                         } else {
-                            assert_eq!(ctx.next_pc_offset, 4);
+                            assert_eq!(ctx.next_pc, PC + 4);
                         }
                     )*
                 }
@@ -1578,12 +1600,12 @@ mod tests {
 
     instruction_test!(jal, 0b00010010010100000001111111101111, ctx, {
         assert_eq!(ctx.register_write, Some((31, PC + 4)));
-        assert_eq!(ctx.next_pc_offset, 6437 & !1);
+        assert_eq!(ctx.next_pc, PC + (6437 & !1));
     });
 
     instruction_test!(jalr, 0b11011100110000000000110001100111, ctx, {
         assert_eq!(ctx.register_write, Some((24, PC + 4)));
-        assert_eq!(ctx.next_pc_offset, -564 & !1);
+        assert_eq!(ctx.next_pc, ((PC as i32) + (-564i32 & !1)) as u32);
     });
 
     branch_test!(beq, 0b00000000000000000000000001100011, [

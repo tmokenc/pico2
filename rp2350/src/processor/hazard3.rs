@@ -5,6 +5,7 @@ pub(crate) mod instruction_format;
 pub(crate) mod registers;
 pub(crate) mod trap;
 
+use super::SleepState;
 use super::{CpuArchitecture, ProcessorContext, Stats};
 use crate::bus::{BusAccessContext, LoadStatus, StoreStatus};
 use crate::common::*;
@@ -12,11 +13,11 @@ use core::mem;
 use csrs::Csrs;
 pub use csrs::PrivilegeMode;
 use exec::*;
-use instruction_format::*;
 pub use registers::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::atomic::AtomicBool;
 use trap::*;
 
 type RegisterWrite = (Register, u32);
@@ -37,8 +38,6 @@ pub(crate) enum State {
         op: AtomicOp,
     },
 
-    // Zcmp instructions
-    Sequence(InstructionSequence),
     #[default]
     Normal,
 }
@@ -52,7 +51,6 @@ impl PartialEq for State {
             (State::BusWaitLoad(_, _), State::BusWaitLoad(_, _)) => true,
             (State::BusWaitStore(_), State::BusWaitStore(_)) => true,
             (State::Atomic { .. }, State::Atomic { .. }) => true,
-            (State::Sequence(_), State::Sequence(_)) => true,
             (State::Normal, State::Normal) => true,
             _ => false,
         }
@@ -62,21 +60,23 @@ impl PartialEq for State {
 impl Eq for State {}
 
 pub struct Hazard3 {
-    pub(self) pc: u32,
-    pub(self) state: State,
-    pub(self) registers: Registers,
-    pub(self) csrs: Csrs,
-    pub(self) xx_bypass: Option<RegisterWrite>,
+    pub pc: u32,
+    pub state: State,
+    pub registers: Registers,
+    pub csrs: Csrs,
+    pub xx_bypass: Option<RegisterWrite>,
     // for atomic instructions
     // should be clear after any atomic instruction, or SC.W or getting a trap
-    pub(self) local_monitor_bit: bool,
+    pub local_monitor_bit: bool,
+    pub sleep_state: SleepState,
+    opposite_sleep_state: SleepState,
 
     // Zcmp extension
     // Some instructions may expand into a sequence of multiple instructions
     pub(self) inst_seq: InstructionSequence,
 
     // for debugging
-    pub(self) monitor: bool,
+    pub monitor: bool,
     pub count_instructions: Option<HashMap<&'static str, u32>>,
 }
 
@@ -90,6 +90,8 @@ impl Default for Hazard3 {
             xx_bypass: None,
             local_monitor_bit: false,
             monitor: false,
+            sleep_state: Rc::new(AtomicBool::new(false)),
+            opposite_sleep_state: Rc::new(AtomicBool::new(false)),
             inst_seq: InstructionSequence::default(),
             count_instructions: None,
         }
@@ -110,6 +112,10 @@ impl CpuArchitecture for Hazard3 {
     }
 
     fn tick(&mut self, ctx: &mut ProcessorContext) {
+        if self.sleep_state.is_sleeping() {
+            return;
+        }
+
         // Value which was in X-X bypass is now written to register
         // since that instruction has done the M (memory) stage
         // which was 1 cycle behind the current instruction
@@ -145,7 +151,7 @@ impl CpuArchitecture for Hazard3 {
             exception,
             register_write,
             memory_access,
-            next_pc_offset,
+            next_pc,
             cycles,
             zcmp_actions,
             instruction_name,
@@ -161,7 +167,11 @@ impl CpuArchitecture for Hazard3 {
         if let Some(exception) = exception {
             return self.trap_handle(exception);
         } else {
-            self.pc = (self.pc as i32).wrapping_add(next_pc_offset) as u32;
+            self.pc = next_pc;
+        }
+
+        if !zcmp_actions.is_empty() {
+            self.inst_seq = zcmp_actions;
         }
 
         if let Some(write) = register_write {
@@ -194,24 +204,22 @@ impl CpuArchitecture for Hazard3 {
         }
     }
 
+    fn set_opposite_sleep_state(&mut self, opposite: SleepState) {
+        self.opposite_sleep_state = opposite;
+    }
+
+    fn set_sleep_state(&mut self, sleep_state: SleepState) {
+        self.sleep_state = sleep_state;
+    }
+
     fn stats(&self) -> &Stats {
         todo!()
     }
 }
 
 impl Hazard3 {
-    /// RP2350 specification section 3.8.4
-    /// Hardware performs the following steps automatically and atomically when entering a trap:
-    ///    1. Save the address of the interrupted or excepting instruction to MEPC
-    ///    2. Set the MSB of MCAUSE to indicate the cause is an interrupt, or clear it to indicate an exception
-    ///    3. Write the detailed trap cause to the LSBs of the MCAUSE register
-    ///    4. Save the current privilege level to MSTATUS.MPP
-    ///    5. Set the privilege to M-mode (note Hazard3 does not implement S-mode)
-    ///    6. Save the current value of MSTATUS.MIE to MSTATUS.MPIE
-    ///    7. Disable interrupts by clearing MSTATUS.MIE
-    ///    8. Jump to the correct offset from MTVEC depending on the trap cause
     fn trap_handle(&mut self, trap: impl Into<Trap>) {
-        todo!()
+        self.csrs.trap_handle(trap, self.pc);
     }
 
     fn update_state(&mut self, ctx: &mut ProcessorContext) {
@@ -258,8 +266,6 @@ impl Hazard3 {
                 // TODO
                 self.state = State::Wfi;
             }
-
-            State::Sequence(seq) => self.inst_seq = seq,
 
             State::Atomic {
                 rd,

@@ -2,6 +2,33 @@
 /// Accessing an unimplemented CSR raises an illegal instruction exception (mcause = 2). This includes all S-mode CSRs.
 use super::trap::{Exception, Trap};
 
+pub const MSTATUS_UIE: u32 = 0x00000001;
+pub const MSTATUS_SIE: u32 = 0x00000002;
+pub const MSTATUS_HIE: u32 = 0x00000004;
+pub const MSTATUS_MIE: u32 = 0x00000008;
+pub const MSTATUS_UPIE: u32 = 0x00000010;
+pub const MSTATUS_SPIE: u32 = 0x00000020;
+pub const MSTATUS_HPIE: u32 = 0x00000040;
+pub const MSTATUS_MPIE: u32 = 0x00000080;
+pub const MSTATUS_SPP: u32 = 0x00000100;
+pub const MSTATUS_HPP: u32 = 0x00000600;
+pub const MSTATUS_MPP: u32 = 0x00001800;
+pub const MSTATUS_FS: u32 = 0x00006000;
+pub const MSTATUS_XS: u32 = 0x00018000;
+pub const MSTATUS_MPRV: u32 = 0x00020000;
+pub const MSTATUS_SUM: u32 = 0x00040000;
+pub const MSTATUS_MXR: u32 = 0x00080000;
+pub const MSTATUS_TVM: u32 = 0x00100000;
+pub const MSTATUS_TW: u32 = 0x00200000;
+pub const MSTATUS_TSR: u32 = 0x00400000;
+pub const MSTATUS32_SD: u32 = 0x80000000;
+// const MSTATUS_UXL: u32 = 0x0000000300000000;
+// const MSTATUS_SXL: u32 = 0x0000000C00000000;
+// const MSTATUS64_SD: u32 = 0x8000000000000000;
+
+pub const MIP_MEIP: u16 = 1 << 11; // TODO correctly handle this
+pub const MIE_MEIE: u32 = 1 << 11;
+
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrivilegeMode {
     Machine = 3,
@@ -9,20 +36,30 @@ pub enum PrivilegeMode {
     User = 0,
 }
 
+impl From<u32> for PrivilegeMode {
+    fn from(value: u32) -> Self {
+        match value {
+            0 | 1 => PrivilegeMode::User,
+            2 | 3 => PrivilegeMode::Machine,
+            _ => unreachable!(),
+        }
+    }
+}
+
 pub(super) struct Csrs {
     mcycles: u64,
     medeleg: u32,
     mideleg: u32,
     minstret: u64,
-    mstatus: u32,
-    mie: u32,
+    pub mstatus: u32,
+    pub mie: u32,
     mtvec: u32,
     mcounteren: u8,
     mcountinhibit: u8,
     mscratch: u32,
     mepc: u32,
     mcause: u32,
-    mip: u16,
+    pub mip: u16,
     pmpcfg: [u32; 4],
     pmpaddr: [u32; 8],
     tselect: u8,
@@ -170,33 +207,60 @@ impl Csrs {
         self.privilege_mode
     }
 
-    pub fn trap_handler(&self, trap: impl Into<Trap>, pc: u32) -> u32 {
-        // self.mstatus = (self.mstatus & !MSTATUS_MPP) | match self.privilege_mode {
-        //     PrivilegeMode::Machine => 3 << 11,
-        //     PrivilegeMode::User => 0 << 11,
-        // };
+    // Trap handle as described in the RP2350 in section 3.8.4
+    pub fn trap_handle(&mut self, trap: impl Into<Trap>, pc: u32) -> u32 {
+        // 1. Save the address of the interrupted or excepting instruction to MEPC
+        self.mepc = pc;
+        // 2. Set the MSB of MCAUSE to indicate the cause is an interrupt, or clear it to indicate an exception
+        let xcause = trap.into().to_xcause();
+        // 3. Write the detailed trap cause to the LSBs of the MCAUSE register
+        self.mcause = xcause;
+        // 4. Save the current privilege level to MSTATUS.MPP
+        self.mstatus = (self.mstatus & !MSTATUS_MPP) | (self.privilege_mode() as u32) << 11;
+        // 5. Set the privilege to M-mode (note Hazard3 does not implement S-mode)
+        self.privilege_mode = PrivilegeMode::Machine;
 
-        // self.privilege_mode = PrivilegeMode::Machine;
+        // 6. Save the current value of MSTATUS.MIE to MSTATUS.MPIE
+        if (self.mstatus & MSTATUS_MIE) != 0 {
+            self.mstatus |= MSTATUS_MPIE;
+        } else {
+            self.mstatus &= !MSTATUS_MPIE;
+        }
 
-        // if (self.mstatus & MSTATUS_MIE) != 0 {
-        //     self.mstatus |= MSTATUS_MPIE;
-        // } else {
-        //     self.mstatus &= !MSTATUS_MPIE;
-        // }
+        // 7. Disable interrupts by clearing MSTATUS.MIE
+        self.mstatus &= !MSTATUS_MIE;
 
-        // self.mstatus &= !MSTATUS_MIE;
+        // 8. Jump to the correct offset from MTVEC depending on the trap cause
+        if (self.mtvec & 1) != 0 && (xcause & (1 << 31)) != 0 {
+            (self.mtvec & !1) + 4 * (xcause & !(1 << 31))
+        } else {
+            self.mtvec & !1
+        }
+    }
 
-        // let xcause = trap.into().into();
-        // self.mcause = xcause;
-        // self.mepc = pc;
+    pub fn trap_mret(&mut self) -> u32 {
+        // 1. Restore core privilege level to the value of MSTATUS.MP
+        self.privilege_mode = PrivilegeMode::from((self.mstatus >> 11) & 0b11);
 
-        // if (self.mtvec & 0x1) && (xcause & (1 << 31)) {
-        //     (self.mtvec & -2) + 4 * (xcause & !(1 << 31))
-        // } else {
-        //     self.mtvec & -2
-        // }
+        // 2. Write 0 (U-mode) to MSTATUS.MPP
+        self.mstatus &= !MSTATUS_MPP; // clear MPP
 
-        0
+        if self.privilege_mode == PrivilegeMode::Machine {
+            self.mstatus &= !MSTATUS_MPRV; // clear MPRV
+        }
+
+        // 3. Restore MSTATUS.MIE from MSTATUS.MPIE
+        if (self.mstatus & MSTATUS_MPIE) != 0 {
+            self.mstatus |= MSTATUS_MIE;
+        } else {
+            self.mstatus &= !MSTATUS_MIE;
+        }
+
+        // 4. Write 1 to MSTATUS.MPIE
+        self.mstatus |= MSTATUS_MPIE;
+
+        // 5. Jump to the address in MEPC.
+        self.mepc
     }
 
     pub fn tick(&mut self) {
@@ -337,14 +401,9 @@ impl Csrs {
     pub(super) fn write(&mut self, csr: u16, value: u32) -> Result<(), Exception> {
         match csr {
             Self::MSTATUS => {
-                let privilege = match (value >> 11) & 0b11 {
-                    0 | 1 => PrivilegeMode::User,
-                    2 | 3 => PrivilegeMode::Machine,
-                    _ => unreachable!(),
-                };
-
-                let mstatus = value & (0b11 << 11); // clear MPP
-                self.mstatus = value | (privilege as u32); // round the privilege mode
+                let privilege = PrivilegeMode::from((value >> 11) & 0b11);
+                let mstatus = value & !(0b11 << 11); // clear MPP
+                self.mstatus = mstatus | (privilege as u32); // round the privilege mode
             }
             Self::MEDELEG => self.medeleg = value,
             Self::MIDELEG => self.mideleg = value,
@@ -431,8 +490,8 @@ impl Csrs {
                     // of being preempted by the standard timer and soft interrupt handlers, 
                     // which may not be aware of Hazard3’s interrupt hardware.
                 }
-                
-                let mut updated_value = value & 0b10;// second bit is self clearing bit
+
+                let updated_value = value & 0b10;// second bit is self clearing bit
 
                 self.meicontext &= 0b1100; // 2nd and 3rd bits are read only
                 self.meicontext |= updated_value;
@@ -446,9 +505,9 @@ impl Csrs {
                 self.dmdata0 = value;
             }
 
-            Self::MISA 
-            | Self::MENVCFG 
-            | Self::MENVCFGH 
+            Self::MISA
+            | Self::MENVCFG
+            | Self::MENVCFGH
             | Self::MSTATUSH
             | Self::MHPMEVENT3..=Self::MHPMEVENT31
             | Self::MTVAL

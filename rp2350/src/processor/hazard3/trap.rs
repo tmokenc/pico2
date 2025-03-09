@@ -31,3 +31,12 @@ impl From<Interrupt> for Trap {
         Self::Interrupt(int)
     }
 }
+
+impl Trap {
+    pub fn to_xcause(self) -> u32 {
+        match self {
+            Trap::Exception(ex) => ex as u32,
+            Trap::Interrupt(int) => (1 << 31) | (int as u32),
+        }
+    }
+}
