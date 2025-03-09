@@ -17,7 +17,6 @@ pub use registers::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::atomic::AtomicBool;
 use trap::*;
 
 type RegisterWrite = (Register, u32);
@@ -90,8 +89,8 @@ impl Default for Hazard3 {
             xx_bypass: None,
             local_monitor_bit: false,
             monitor: false,
-            sleep_state: Rc::new(AtomicBool::new(false)),
-            opposite_sleep_state: Rc::new(AtomicBool::new(false)),
+            sleep_state: SleepState::default(),
+            opposite_sleep_state: SleepState::default(),
             inst_seq: InstructionSequence::default(),
             count_instructions: None,
         }
@@ -146,6 +145,7 @@ impl CpuArchitecture for Hazard3 {
 
         let mut exec_ctx = ExecContext::new(self, ctx.bus);
         exec_instruction(inst_code, &mut exec_ctx);
+        exec_ctx.finalize();
 
         let ExecContext {
             exception,

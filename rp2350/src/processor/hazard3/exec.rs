@@ -80,9 +80,9 @@ pub(super) enum ZcmpAction {
 }
 
 pub(super) struct ExecContext<'a> {
+    xx_bypassed: bool,
     pub(super) cycles: u8,
     pub(super) next_pc: u32,
-    pub(super) register_read: Option<Register>,
     pub(super) register_write: Option<(Register, u32)>,
     pub(super) exception: Option<Exception>,
     pub(super) memory_access: MemoryAccess,
@@ -97,7 +97,7 @@ impl ExecContext<'_> {
     pub fn new<'a>(core: &'a mut Hazard3, bus: &'a mut Bus) -> ExecContext<'a> {
         ExecContext {
             cycles: 1,
-            register_read: None,
+            xx_bypassed: false,
             register_write: None,
             exception: None,
             instruction_name: "Unknown",
@@ -110,12 +110,24 @@ impl ExecContext<'_> {
         }
     }
 
+    pub fn finalize(&mut self) {
+        if self.xx_bypassed {
+            self.cycles += 1;
+        }
+    }
+
     fn privilege_mode(&self) -> PrivilegeMode {
         self.core.csrs.privilege_mode
     }
 
     fn read_register(&mut self, reg: u8) -> u32 {
-        self.register_read = Some(reg);
+        if let Some(bypassing_value) = self.core.xx_bypass {
+            if bypassing_value.0 == reg {
+                self.xx_bypassed = true;
+                return bypassing_value.1;
+            }
+        }
+
         self.core.registers.read(reg)
     }
 
@@ -956,14 +968,14 @@ fn exec_atomic_instruction(code: u32, ctx: &mut ExecContext) {
 
             let result = (a >> shamt) & !(((-1i32) as u32) << size);
             ctx.write_register(rd, result);
+            return;
         }
 
         0b010 => {} // Atomic instructions
-        _ => ctx.raise_exception(Exception::IllegalInstruction),
-    }
-
-    if func3 != 0b010 {
-        ctx.raise_exception(Exception::IllegalInstruction);
+        _ => {
+            ctx.raise_exception(Exception::IllegalInstruction);
+            return;
+        }
     }
 
     let RType { rd, rs1, rs2 } = code.into();
