@@ -1,5 +1,5 @@
 [workspace]
-members = ["circuit_board", "web", "rp2350"]
+members = ["web", "rp2350"]
 resolver = "2"
 
 [workspace.dependencies]
