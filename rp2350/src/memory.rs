@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MemoryOutOfBoundsError;
 
@@ -7,6 +9,14 @@ pub struct GenericMemory<const N: usize> {
     data: Vec<u8>,
 }
 
+impl<const N: usize> Deref for GenericMemory<N> {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
 impl<const N: usize> Default for GenericMemory<N> {
     fn default() -> Self {
         Self { data: vec![0; N] }
@@ -14,7 +24,9 @@ impl<const N: usize> Default for GenericMemory<N> {
 }
 
 impl<const N: usize> GenericMemory<N> {
-    pub fn new(data: [u8; N]) -> Self {
+    pub fn new(data: &[u8]) -> Self {
+        assert!(data.len() <= N);
+
         Self {
             data: data.to_vec(),
         }

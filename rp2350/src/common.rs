@@ -27,3 +27,13 @@ pub(crate) enum DataSize {
     #[default]
     Word,
 }
+
+impl Requestor {
+    pub fn is_dma(&self) -> bool {
+        matches!(self, Requestor::DmaR | Requestor::DmaW)
+    }
+
+    pub fn is_proc(&self) -> bool {
+        matches!(self, Requestor::Proc0 | Requestor::Proc1)
+    }
+}

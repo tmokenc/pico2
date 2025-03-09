@@ -1,3 +1,4 @@
+use crate::gpio::GpioPinValue;
 use super::*;
 use std::cell::RefCell;
 
@@ -24,20 +25,10 @@ pub const UARTPCellID1: u16 = 0xFF4; // UARTPCellID1 Register
 pub const UARTPCellID2: u16 = 0xFF8; // UARTPCellID2 Register
 pub const UARTPCellID3: u16 = 0xFFC; // UARTPCellID3 Register
 
-struct Fifo<const N: usize> {
-    data: RefCell<Vec<u8>>,
-}
-
+#[derive(Debug, Default)]
 pub struct Uart {
-    // TODO
-}
-
-impl Default for Uart {
-    fn default() -> Self {
-        Self {
-            // TODO
-        }
-    }
+    tx: GpioPinValue,
+    rx: GpioPinValue,
 }
 
 impl Peripheral for Uart {

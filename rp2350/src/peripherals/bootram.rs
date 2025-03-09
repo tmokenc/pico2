@@ -1,8 +1,10 @@
 use super::*;
+use crate::memory::GenericMemory;
 use std::cell::RefCell;
+use std::ops::Deref;
 
 pub struct BootRam {
-    data: [u32; 256],
+    pub data: GenericMemory<{ 256 * 4 }>,
     write_onces: [u32; 2],
     boot_locks: RefCell<u8>, // 8 in total
 }
@@ -10,7 +12,7 @@ pub struct BootRam {
 impl Default for BootRam {
     fn default() -> Self {
         Self {
-            data: [0; 256],
+            data: GenericMemory::default(),
             write_onces: [0; 2],
             boot_locks: RefCell::new(0),
         }
@@ -42,13 +44,10 @@ impl Peripheral for BootRam {
                 }
             }
 
-            _ => {
-                let index = address as usize / 4;
-                self.data
-                    .get(index)
-                    .copied()
-                    .ok_or(PeripheralError::OutOfBounds)
-            }
+            _ => self
+                .data
+                .read_u32(address as u32)
+                .map_err(|_| PeripheralError::OutOfBounds),
         }
     }
 
@@ -80,11 +79,9 @@ impl Peripheral for BootRam {
             }
 
             _ => {
-                let index = address as usize / 4;
-                match self.data.get_mut(index) {
-                    Some(v) => *v = value,
-                    None => return Err(PeripheralError::OutOfBounds),
-                }
+                self.data
+                    .write_u32(address as u32, value)
+                    .map_err(|_| PeripheralError::OutOfBounds)?;
             }
         }
 
