@@ -16,7 +16,7 @@ const OPCODE_STORE: u32 = 0b0100011;
 const OPCODE_ARITHMETIC_IMM: u32 = 0b0010011;
 const OPCODE_AIRTHMETIC_REG: u32 = 0b0110011;
 const OPCODE_BRANCH: u32 = 0b1100011;
-const OPCODE_ATOMIC: u32 = 0b0101111;
+const OPCODE_CUSTOM0: u32 = 0b0101111;
 
 const OPCODE_JAL: u32 = 0b1101111;
 const OPCODE_JALR: u32 = 0b1100111;
@@ -929,7 +929,40 @@ fn exec_branch_instruction(code: u32, ctx: &mut ExecContext) {
 
 #[inline]
 fn exec_atomic_instruction(code: u32, ctx: &mut ExecContext) {
-    if func3(code) != 0b010 {
+    let func3 = func3(code);
+
+    match func3 {
+        0b000 | 0b100 => {
+            ctx.inst_name("H3.BEXTM");
+            let func7 = func7(code);
+
+            // func7[0] and func7[6:4] must be 0
+            let mask = 0b111 << 4 | 0b1;
+            if func7 & mask != 0 {
+                ctx.raise_exception(Exception::IllegalInstruction);
+                return;
+            }
+
+            let RType { rd, rs1, rs2 } = code.into();
+            let size = extract_bits(func7, 1..=3) + 1;
+
+            let a = ctx.read_register(rs1);
+
+            let shamt = if func3 == 0b000 {
+                ctx.read_register(rs2) & 0b11111
+            } else {
+                rs2 as u32
+            };
+
+            let result = (a >> shamt) & !(((-1i32) as u32) << size);
+            ctx.write_register(rd, result);
+        }
+
+        0b010 => {} // Atomic instructions
+        _ => ctx.raise_exception(Exception::IllegalInstruction),
+    }
+
+    if func3 != 0b010 {
         ctx.raise_exception(Exception::IllegalInstruction);
     }
 
@@ -1428,17 +1461,17 @@ pub(super) fn exec_instruction(code: u32, ctx: &mut ExecContext<'_>) {
             OPCODE_ARITHMETIC_IMM => exec_arit_imm_instruction(code, ctx),
             OPCODE_AIRTHMETIC_REG => exec_arit_reg_instruction(code, ctx),
             OPCODE_BRANCH => exec_branch_instruction(code, ctx),
-            OPCODE_ATOMIC => exec_atomic_instruction(code, ctx),
+            OPCODE_CUSTOM0 => exec_atomic_instruction(code, ctx),
             _ if code == 0b00000000000000000001000000001111 => {
                 ctx.inst_name("FENCE.I");
                 // Do nothing
             }
             _ if code == 0b00000000000000000010000000110011 => {
-                ctx.inst_name("_H3.BLOCK");
+                ctx.inst_name("H3.BLOCK");
                 ctx.core.sleep_state.sleep();
             }
             _ if code == 0b00000000000100000010000000110011 => {
-                ctx.inst_name("_H3.UNBLOCK");
+                ctx.inst_name("H3.UNBLOCK");
                 ctx.core.opposite_sleep_state.wake();
             }
             _ if extract_bits(code, 0..=19) == 0b00000000000000001111 => {
