@@ -1,5 +1,7 @@
 // ----------------------------------------------------------------------------
 
+use egui::Color32;
+
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct CodeEditor {
@@ -51,7 +53,10 @@ impl CodeEditor {
         };
 
         egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.add(
+            let size = ui.available_size_before_wrap();
+
+            ui.add_sized(
+                size,
                 egui::TextEdit::multiline(code)
                     .font(egui::TextStyle::Monospace) // for cursor height
                     .code_editor()

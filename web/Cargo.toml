@@ -2,9 +2,8 @@
 name = "pico2"
 version = "0.1.0"
 authors = ["Nguyen Le Duy <xnguye27@stud.fit.vut.cz>"]
-edition = "2021"
+edition = "2024"
 include = ["LICENSE-APACHE", "LICENSE-MIT", "**/*.rs", "Cargo.toml"]
-rust-version = "1.81"
 
 [package.metadata.docs.rs]
 all-features = true
@@ -26,8 +25,12 @@ egui_dock = "0.16"
 
 # You only need serde if you want app persistence:
 serde = { version = "1", features = ["derive"] }
-egui_extras = { version = "0.31", features = ["serde", "all_loaders"] }
-image = { version = "*", features = ["png"] }
+egui_extras = { version = "0.31", features = ["serde", "svg", "image", "all_loaders"] }
+image = { version = "*", features = ["webp"] }
+egui_alignments = {git = "https://github.com/a-littlebit/egui_alignments.git", rev = "91c1f4eb2f18ad894d025789d0da8cfb78ccde2e"} 
+futures = "0.3"
+web-time = "1"
+gloo = {version = "0.11", features = ["futures", "timers"]}
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

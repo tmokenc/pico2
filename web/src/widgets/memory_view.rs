@@ -78,7 +78,7 @@ impl<const OFFSET: usize> MemoryView<OFFSET> {
         ui.end_row();
 
         ui.label("Display mode:");
-        self.display_mode.bin_hex(ui);
+        ui.add(self.display_mode.bin_hex());
         ui.end_row();
     }
 
@@ -136,7 +136,7 @@ impl<const OFFSET: usize> MemoryView<OFFSET> {
                         for col_index in 0..self.bytes_per_row {
                             let index = row_index * self.bytes_per_row + col_index;
                             if index < mem.len() {
-                                let fmt = self.display_mode.display(mem[index]);
+                                let fmt = self.display_mode.fmt_u8(mem[index]);
                                 string.push_str(&fmt);
                                 string.push(' ');
                             }

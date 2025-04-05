@@ -51,8 +51,7 @@ fn main() {
             .start(
                 canvas,
                 web_options,
-                // Box::new(|cc| Ok(Box::new(pico2::SimulatorApp::new(cc)))),
-                Box::new(|_cc| Ok(Box::<SimulatorApp>::default())),
+                Box::new(|cc| Ok(Box::new(pico2::SimulatorApp::new(cc)))),
             )
             .await;
 

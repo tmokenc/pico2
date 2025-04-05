@@ -10,23 +10,25 @@ pub enum DisplayMode {
 }
 
 impl DisplayMode {
-    pub fn bin_dec_hex_char(&mut self, ui: &mut egui::Ui) {
-        self.ui(
-            ui,
-            &[
-                (Self::Binary, "Bin"),
-                (Self::Decimal, "Dec"),
-                (Self::Hexadecimal, "Hex"),
-                (Self::Character, "Char"),
-            ],
-        );
+    pub fn bin_dec_hex_char(&mut self) -> impl egui::Widget + '_ {
+        move |ui: &mut egui::Ui| {
+            self.ui(
+                ui,
+                &[
+                    (Self::Binary, "Bin"),
+                    (Self::Decimal, "Dec"),
+                    (Self::Hexadecimal, "Hex"),
+                    (Self::Character, "Char"),
+                ],
+            )
+        }
     }
 
-    pub fn bin_hex(&mut self, ui: &mut egui::Ui) {
-        self.ui(ui, &[(Self::Binary, "Bin"), (Self::Hexadecimal, "Hex")]);
+    pub fn bin_hex(&mut self) -> impl egui::Widget + '_ {
+        move |ui: &mut egui::Ui| self.ui(ui, &[(Self::Binary, "Bin"), (Self::Hexadecimal, "Hex")])
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, modes: &[(Self, &str)]) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, modes: &[(Self, &str)]) -> egui::Response {
         ui.horizontal(|ui| {
             for (mode, label) in modes {
                 let mut text = RichText::new(*label);
@@ -41,26 +43,38 @@ impl DisplayMode {
                     *self = *mode;
                 }
             }
-        });
+        })
+        .response
     }
 
     fn active_color(&self) -> egui::Color32 {
         egui::Color32::from_rgb(0x00, 0x7f, 0x7f)
     }
 
-    // take a generic type T that can be formatted as binary and hex
-    pub fn display<T>(&self, value: T) -> String
-    where
-        T: std::fmt::UpperHex + std::fmt::Binary + std::fmt::Display + Into<u32>,
-    {
+    pub fn fmt_u8(&self, value: u8) -> String {
         match self {
             DisplayMode::Binary => format!("{:08b}", value),
             DisplayMode::Decimal => format!("{:03}", value),
             DisplayMode::Hexadecimal => format!("{:02X}", value),
             DisplayMode::Character => {
                 // convert the value to a char
-                let c = char::from_u32(value.into()).unwrap();
+                let c = value as char;
                 format!("{}", c.escape_default())
+            }
+        }
+    }
+
+    pub fn fmt_u32(&self, value: u32) -> String {
+        match self {
+            DisplayMode::Binary => format!("{:032b}", value),
+            DisplayMode::Decimal => format!("{:010}", value),
+            DisplayMode::Hexadecimal => format!("{:08X}", value),
+            DisplayMode::Character => {
+                // convert the value to a char
+                match char::from_u32(value) {
+                    Some(c) => format!("{}", c.escape_default()),
+                    None => format!("0x{:08X}", value),
+                }
             }
         }
     }
