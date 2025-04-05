@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use api_types::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -11,16 +11,8 @@ use warp::reject::Reject;
 
 use crate::config::ServerConfig;
 
-#[derive(Deserialize, Serialize, Debug)]
-pub struct SourceCode {
-    pub filename: String,
-    pub code: String,
-}
-
 #[derive(Error, Debug)]
 pub enum CompileError {
-    #[error("Unsupported language")]
-    UnsupportedLanguage,
     #[error("Compilation error: {0}")]
     CompilationError(String),
     #[error("No code provided")]
@@ -40,25 +32,6 @@ enum CompilationStatus {
     Success,
     Failure(CompileError),
     InProgress,
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-pub enum CompilationResult {
-    Success { uf2: Vec<u8> },
-    Error { message: String },
-    InProgress { id: String },
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-pub struct CompileResultRequest {
-    pub id: String,
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-pub struct CompileRequest {
-    pub lang: String,
-    pub code: Vec<SourceCode>,
-    pub compiler_opt: Option<String>, // Optional compile options, for future use
 }
 
 pub struct Compiler {
@@ -99,26 +72,21 @@ impl Compiler {
         Ok(res)
     }
 
-    pub async fn compile(&mut self, req: CompileRequest) -> CompilationResult {
+    pub async fn compile(&mut self, req: CompilationRequest) -> CompilationResponse {
         let id = generate_id();
 
-        let res = match req.lang.as_str() {
-            "c" => self.compile_c_code(&id, &req).await,
-            _ => {
-                return CompilationResult::Error {
-                    message: CompileError::UnsupportedLanguage.to_string(),
-                }
-            }
+        let res = match req.lang {
+            Language::C => self.compile_c_code(&id, &req).await,
         };
 
         match res {
             Ok(_) => match self.get_uf2(&id).await {
-                Ok(uf2) => CompilationResult::Success { uf2 },
-                Err(e) => CompilationResult::Error {
+                Ok(uf2) => CompilationResponse::Done { uf2 },
+                Err(e) => CompilationResponse::Error {
                     message: e.to_string(),
                 },
             },
-            Err(e) => CompilationResult::Error {
+            Err(e) => CompilationResponse::Error {
                 message: e.to_string(),
             },
         }
@@ -131,38 +99,38 @@ impl Compiler {
             .map_err(CompileError::FileSystemError)
     }
 
-    pub async fn get_result(&mut self, id: &str) -> CompilationResult {
+    pub async fn get_result(&mut self, id: &str) -> CompilationResponse {
         let lock = self.results.lock().await;
 
         match lock.get(id) {
             Some(CompilationStatus::InProgress) => {
-                CompilationResult::InProgress { id: id.to_string() }
+                CompilationResponse::InProgress { id: id.to_string() }
             }
             Some(CompilationStatus::Success) => {
                 drop(lock);
 
                 match self.get_uf2(id).await {
-                    Ok(uf2) => CompilationResult::Success { uf2 },
-                    Err(e) => CompilationResult::Error {
+                    Ok(uf2) => CompilationResponse::Done { uf2 },
+                    Err(e) => CompilationResponse::Error {
                         message: e.to_string(),
                     },
                 }
             }
-            Some(CompilationStatus::Failure(e)) => CompilationResult::Error {
+            Some(CompilationStatus::Failure(e)) => CompilationResponse::Error {
                 message: e.to_string(),
             },
-            None => CompilationResult::Error {
+            None => CompilationResponse::Error {
                 message: "Unknown ID".to_string(),
             },
         }
     }
 
-    async fn compile_c_code(&self, id: &str, req: &CompileRequest) -> Result<(), CompileError> {
-        if req.code.len() > 1 {
+    async fn compile_c_code(&self, id: &str, req: &CompilationRequest) -> Result<(), CompileError> {
+        if req.source.len() > 1 {
             return Err(CompileError::UnsupportedMultipleFiles);
         }
 
-        let Some(code) = req.code.iter().next() else {
+        let Some(code) = req.source.iter().next() else {
             return Err(CompileError::NoCode);
         };
 

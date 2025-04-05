@@ -14,3 +14,4 @@ nanoid = "0.4"
 thiserror = "2"
 anyhow = "1"
 log = "0.4"
+api_types = { path = "../api_types" }

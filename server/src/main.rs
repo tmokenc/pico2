@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use api_types::{CompilationRequest, CompilationStatusRequest};
 use std::net;
 use std::sync::Arc;
 use tokio::fs;
@@ -15,8 +15,10 @@ const CONFIG_PATH: &str = "config.toml";
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = config::ServerConfig::parse(CONFIG_PATH)?;
+    println!("Config: {:?}", config);
 
-    let dir = fs::canonicalize(&config.dir).await?;
+    let dir = fs::canonicalize(&config.static_dir).await?;
+
     let index_file = warp::fs::file(dir.join("index.html"));
     let ip_address: net::IpAddr = config.ip.parse().expect("Invalid IP address");
 
@@ -53,15 +55,8 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-enum CompilationResponse {
-    InProgress { id: String },
-    Done { uf2: Vec<u8> },
-    Error { message: String },
-}
-
 async fn compile_handler(
-    request: CompileRequest,
+    request: CompilationRequest,
     compiler: Arc<Mutex<Compiler>>,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     let mut compiler = compiler.lock().await;
@@ -71,7 +66,7 @@ async fn compile_handler(
 }
 
 async fn result_handler(
-    request: CompileResultRequest,
+    request: CompilationStatusRequest,
     compiler: Arc<Mutex<Compiler>>,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     let mut compiler = compiler.lock().await;

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 pub struct ServerConfig {
     pub port: u16,
     pub ip: String,
-    pub dir: String,
+    pub static_dir: String,
     pub data_dir: String,
     pub sdk_path: Option<String>,
 }
@@ -14,7 +14,7 @@ impl Default for ServerConfig {
         Self {
             port: 8888,
             ip: String::from("127.0.0.1"),
-            dir: String::from("./static"),
+            static_dir: String::from("./static"),
             data_dir: String::from("./data"),
             sdk_path: None,
         }
