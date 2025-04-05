@@ -1,5 +1,6 @@
 [workspace]
-members = ["web", "rp2350"]
+members = ["web", "rp2350", "server"]
 resolver = "2"
+edition = "2024"
 
 [workspace.dependencies]
