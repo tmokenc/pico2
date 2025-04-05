@@ -1,6 +1,5 @@
 use super::CpuArchitecture;
 use super::ProcessorContext;
-use super::SleepState;
 use super::Stats;
 
 #[derive(Default)]
@@ -25,11 +24,11 @@ impl CpuArchitecture for CortexM33 {
         todo!()
     }
 
-    fn set_opposite_sleep_state(&mut self, opposite: SleepState) {
+    fn sleep(&mut self) {
         todo!()
     }
 
-    fn set_sleep_state(&mut self, sleep_state: SleepState) {
+    fn wake(&mut self) {
         todo!()
     }
 

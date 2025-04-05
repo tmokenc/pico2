@@ -213,8 +213,6 @@ impl Peripheral for BusCtrl {
     }
 }
 
-// TODO test
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -89,6 +89,7 @@ pub(super) struct ExecContext<'a> {
     pub(super) bus: &'a mut Bus,
     pub(super) core: &'a mut Hazard3,
     pub(super) instruction_name: &'static str,
+    pub(super) wake_opposite_core: bool,
     pub(super) mret: bool,
     pub(super) zcmp_actions: InstructionSequence,
 }
@@ -104,6 +105,7 @@ impl ExecContext<'_> {
             next_pc: 0,
             memory_access: MemoryAccess::None,
             zcmp_actions: Fifo::default(),
+            wake_opposite_core: false,
             mret: false,
             core,
             bus,
@@ -1480,11 +1482,11 @@ pub(super) fn exec_instruction(code: u32, ctx: &mut ExecContext<'_>) {
             }
             _ if code == 0b00000000000000000010000000110011 => {
                 ctx.inst_name("H3.BLOCK");
-                ctx.core.sleep_state.sleep();
+                ctx.core.sleep();
             }
             _ if code == 0b00000000000100000010000000110011 => {
                 ctx.inst_name("H3.UNBLOCK");
-                ctx.core.opposite_sleep_state.wake();
+                ctx.wake_opposite_core = true;
             }
             _ if extract_bits(code, 0..=19) == 0b00000000000000001111 => {
                 ctx.inst_name("FENCE");
@@ -1502,18 +1504,29 @@ pub(super) fn exec_instruction(code: u32, ctx: &mut ExecContext<'_>) {
 mod tests {
     use super::*;
     use crate::bus::Bus;
+    use crate::gpio::GpioController;
     use crate::processor::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     const PC: u32 = 0x1000;
+
+    macro_rules! setup {
+        ($core:ident, $bus:ident) => {
+            let interrupts = Rc::new(RefCell::new(Interrupts::default()));
+            let gpio = Rc::new(RefCell::new(GpioController::default()));
+
+            let mut $core = Hazard3::new(Rc::clone(&interrupts));
+            $core.set_pc(PC);
+            let mut $bus = Bus::new(gpio, interrupts);
+        };
+    }
 
     macro_rules! instruction_test {
         ($name:ident, $instr:expr, $ctx:ident, { $($assertion:tt)* }) => {
             #[test]
             fn $name() {
-                let mut core = Hazard3::default();
-                core.set_pc(PC);
-                // core.registers.write(1, PC);
-                let mut bus = Bus::new();
+                setup!(core, bus);
                 let mut $ctx = ExecContext::new(&mut core, &mut bus);
                 exec_instruction($instr, &mut $ctx);
                 $($assertion)*
@@ -1525,8 +1538,7 @@ mod tests {
         ($name:ident, $instr_mask:expr, [$($a:expr, $b:expr => $expected:expr),* $(,)?]) => {
             #[test]
             fn $name() {
-                let mut core = Hazard3::default();
-                let mut bus = Bus::new();
+                setup!(core, bus);
                 core.set_pc(PC);
                 let rs1: u32 = 1;
                 let rs2: u32 = 2;
@@ -1552,8 +1564,7 @@ mod tests {
 
             #[test]
             fn $name_imm() {
-                let mut core = Hazard3::default();
-                let mut bus = Bus::new();
+                setup!(core, bus);
                 core.set_pc(PC);
                 let rs1: u32 = 1;
                 let rs2: u32 = 2;
@@ -1579,8 +1590,7 @@ mod tests {
 
             #[test]
             fn $name_imm() {
-                let mut core = Hazard3::default();
-                let mut bus = Bus::new();
+                setup!(core, bus);
                 core.set_pc(PC);
                 let rs1: u32 = 1;
                 let rs2: u32 = 2;
@@ -1606,8 +1616,7 @@ mod tests {
         ($name:ident, $instr_mask:expr, [$($a:expr, $b:expr => $expected:expr),* $(,)?]) => {
             #[test]
             fn $name() {
-                let mut core = Hazard3::default();
-                let mut bus = Bus::new();
+                setup!(core, bus);
                 core.set_pc(PC);
                 let rs1: u32 = 1;
                 let rs2: u32 = 2;

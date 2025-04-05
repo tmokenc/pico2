@@ -92,19 +92,28 @@ impl Peripheral for BootRam {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::Requestor;
+
+    macro_rules! setup {
+        ($bootram:ident, $ctx:ident) => {
+            let $ctx = PeripheralAccessContext {
+                requestor: Requestor::Proc0,
+                secure: true,
+            };
+            let mut $bootram = BootRam::default();
+        };
+    }
 
     #[test]
     fn test_bootram() {
-        let ctx = PeripheralAccessContext::new();
-        let mut bootram = BootRam::default();
+        setup!(bootram, ctx);
         bootram.write_raw(0x800, 0x1, &ctx).unwrap();
         assert_eq!(bootram.read(0x800, &ctx).unwrap(), 0x1);
     }
 
     #[test]
     fn test_bootram_locks() {
-        let ctx = PeripheralAccessContext::new();
-        let mut bootram = BootRam::default();
+        setup!(bootram, ctx);
         assert_eq!(bootram.read(0x80C, &ctx), Ok(1));
         assert_eq!(bootram.read(0x80C, &ctx), Ok(0));
         assert_eq!(bootram.write(0x80C, 0x1, &ctx), Ok(()));
@@ -113,8 +122,7 @@ mod tests {
 
     #[test]
     fn test_bootram_write_once() {
-        let ctx = PeripheralAccessContext::new();
-        let mut bootram = BootRam::default();
+        setup!(bootram, ctx);
         assert_eq!(bootram.read(0x800, &ctx), Ok(0));
         assert_eq!(bootram.write(0x800, 0x1, &ctx), Ok(()));
         assert_eq!(bootram.read(0x800, &ctx), Ok(1));
@@ -124,8 +132,7 @@ mod tests {
 
     #[test]
     fn test_bootram_write_once_2() {
-        let ctx = PeripheralAccessContext::new();
-        let mut bootram = BootRam::default();
+        setup!(bootram, ctx);
         assert_eq!(bootram.read(0x804, &ctx), Ok(0));
         assert_eq!(bootram.write(0x804, 0x1, &ctx), Ok(()));
         assert_eq!(bootram.read(0x804, &ctx), Ok(1));
@@ -135,8 +142,7 @@ mod tests {
 
     #[test]
     fn test_bootram_multiple_locks() {
-        let ctx = PeripheralAccessContext::new();
-        let mut bootram = BootRam::default();
+        setup!(bootram, ctx);
         assert_eq!(bootram.read(0x80C, &ctx), Ok(1));
         assert_eq!(bootram.read(0x810, &ctx), Ok(2));
         assert_eq!(bootram.read(0x814, &ctx), Ok(4));

@@ -5,10 +5,10 @@ pub(crate) mod instruction_format;
 pub(crate) mod registers;
 pub(crate) mod trap;
 
-use super::SleepState;
 use super::{CpuArchitecture, ProcessorContext, Stats};
 use crate::bus::{BusAccessContext, LoadStatus, StoreStatus};
 use crate::common::*;
+use crate::interrupts::Interrupts;
 use core::mem;
 use csrs::Csrs;
 pub use csrs::PrivilegeMode;
@@ -27,6 +27,7 @@ pub(crate) enum State {
     Stall(u8, RegisterWrite),
     BusWaitLoad(Register, Rc<RefCell<LoadStatus>>),
     BusWaitStore(Rc<RefCell<StoreStatus>>),
+    Sleep(Box<State>),
 
     // Atomic instructions
     Atomic {
@@ -51,6 +52,7 @@ impl PartialEq for State {
             (State::BusWaitStore(_), State::BusWaitStore(_)) => true,
             (State::Atomic { .. }, State::Atomic { .. }) => true,
             (State::Normal, State::Normal) => true,
+            (State::Sleep(_), State::Sleep(_)) => true,
             _ => false,
         }
     }
@@ -67,21 +69,23 @@ pub struct Hazard3 {
     // for atomic instructions
     // should be clear after any atomic instruction, or SC.W or getting a trap
     pub local_monitor_bit: bool,
-    pub sleep_state: SleepState,
-    opposite_sleep_state: SleepState,
 
     // Zcmp extension
     // Some instructions may expand into a sequence of multiple instructions
     pub(self) inst_seq: InstructionSequence,
+
+    // Reference to the interrupts controller
+    interrupts: Rc<RefCell<Interrupts>>,
 
     // for debugging
     pub monitor: bool,
     pub count_instructions: Option<HashMap<&'static str, u32>>,
 }
 
-impl Default for Hazard3 {
-    fn default() -> Self {
+impl Hazard3 {
+    pub fn new(interrupts: Rc<RefCell<Interrupts>>) -> Self {
         Self {
+            interrupts,
             pc: 0x6aac, // or 0x6a2c
             state: State::default(),
             registers: Registers::default(),
@@ -89,8 +93,6 @@ impl Default for Hazard3 {
             xx_bypass: None,
             local_monitor_bit: false,
             monitor: false,
-            sleep_state: SleepState::default(),
-            opposite_sleep_state: SleepState::default(),
             inst_seq: InstructionSequence::default(),
             count_instructions: None,
         }
@@ -111,7 +113,7 @@ impl CpuArchitecture for Hazard3 {
     }
 
     fn tick(&mut self, ctx: &mut ProcessorContext) {
-        if self.sleep_state.is_sleeping() {
+        if let State::Sleep(_) = self.state {
             return;
         }
 
@@ -155,6 +157,7 @@ impl CpuArchitecture for Hazard3 {
             cycles,
             zcmp_actions,
             instruction_name,
+            wake_opposite_core,
             ..
         } = exec_ctx;
 
@@ -169,6 +172,8 @@ impl CpuArchitecture for Hazard3 {
         } else {
             self.pc = next_pc;
         }
+
+        ctx.wake_opposite_core = wake_opposite_core;
 
         if !zcmp_actions.is_empty() {
             self.inst_seq = zcmp_actions;
@@ -204,12 +209,15 @@ impl CpuArchitecture for Hazard3 {
         }
     }
 
-    fn set_opposite_sleep_state(&mut self, opposite: SleepState) {
-        self.opposite_sleep_state = opposite;
+    fn sleep(&mut self) {
+        let last_state = mem::take(&mut self.state);
+        self.state = State::Sleep(Box::new(last_state));
     }
 
-    fn set_sleep_state(&mut self, sleep_state: SleepState) {
-        self.sleep_state = sleep_state;
+    fn wake(&mut self) {
+        if let State::Sleep(state) = mem::take(&mut self.state) {
+            self.state = *state;
+        }
     }
 
     fn stats(&self) -> &Stats {
@@ -224,6 +232,7 @@ impl Hazard3 {
 
     fn update_state(&mut self, ctx: &mut ProcessorContext) {
         match mem::take(&mut self.state) {
+            State::Sleep(state) => {}
             State::Stall(cycles, reg_write) => {
                 if cycles == 1 {
                     self.xx_bypass = Some(reg_write);
@@ -436,21 +445,20 @@ impl Hazard3 {
 mod tests {
     use super::*;
     use crate::bus::Bus;
-    use crate::interrupts::Interrupts;
+    use crate::processor::ProcessorContext;
 
     const SRAM: u32 = 0x2000_0000;
 
     macro_rules! setup {
         ($cpu:tt, $ctx:tt) => {
-            let mut $cpu = Hazard3::default();
+            let mut $cpu = Hazard3::new(Default::default());
             let mut bus = Bus::default();
-            let mut interrupts = Interrupts::default();
 
             $cpu.set_pc(SRAM);
 
             let mut $ctx = ProcessorContext {
                 bus: &mut bus,
-                interrupts: &mut interrupts,
+                wake_opposite_core: false,
             };
         };
     }

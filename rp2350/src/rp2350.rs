@@ -3,39 +3,50 @@ use crate::clock::Clock;
 use crate::common::*;
 use crate::gpio::GpioController;
 use crate::interrupts::Interrupts;
-use crate::processor::{ProcessorContext, Rp2350Core, SleepState};
+use crate::processor::{ProcessorContext, Rp2350Core};
+use std::cell::RefCell;
+use std::rc::Rc;
 
-#[derive(Default)]
 pub struct Rp2350 {
     pub clock: Clock<{ 150 * MHZ }>,
     pub bus: Bus,
     pub processor: [Rp2350Core; 2],
-    pub gpio: GpioController,
-    pub interrupts: Interrupts,
+    pub gpio: Rc<RefCell<GpioController>>,
+    pub interrupts: Rc<RefCell<Interrupts>>,
+}
+
+impl Default for Rp2350 {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Rp2350 {
     pub fn new() -> Self {
-        let mut processor = [Rp2350Core::new(), Rp2350Core::new()];
+        let gpio = Rc::new(RefCell::new(GpioController::default()));
+        let interrupts = Rc::new(RefCell::new(Interrupts::default()));
+
+        let mut processor = [
+            Rp2350Core::new(Rc::clone(&interrupts)),
+            Rp2350Core::new(Rc::clone(&interrupts)),
+        ];
         processor[0].set_core_id(0);
         processor[1].set_core_id(1);
 
-        let sleep_state_core0 = SleepState::new(false);
-        let sleep_state_core1 = SleepState::new(true);
-
-        processor[0].set_sleep_state(sleep_state_core0.clone());
-        processor[1].set_sleep_state(sleep_state_core1.clone());
-
-        processor[0].set_opposite_sleep_state(sleep_state_core1);
-        processor[1].set_opposite_sleep_state(sleep_state_core0);
+        // By default the second core is sleeping
+        processor[1].sleep();
 
         Self {
             processor,
             clock: Clock::default(),
-            bus: Bus::new(),
-            interrupts: Interrupts::default(),
-            gpio: GpioController::default(),
+            bus: Bus::new(Rc::clone(&gpio), Rc::clone(&interrupts)),
+            interrupts,
+            gpio,
         }
+    }
+
+    pub fn load_program(&mut self, core_id: usize, program: Vec<u32>) {
+        todo!()
     }
 
     pub fn tick(&mut self) {
@@ -43,10 +54,23 @@ impl Rp2350 {
 
         let mut ctx = ProcessorContext {
             bus: &mut self.bus,
-            interrupts: &mut self.interrupts,
+            wake_opposite_core: false,
         };
 
         self.processor[0].tick(&mut ctx);
+        let wake_core_1 = ctx.wake_opposite_core;
+        ctx.wake_opposite_core = false;
+
         self.processor[1].tick(&mut ctx);
+        let wake_core_0 = ctx.wake_opposite_core;
+
+        // only wake after both cores have ticked
+        if wake_core_1 {
+            self.processor[1].wake();
+        }
+
+        if wake_core_0 {
+            self.processor[0].wake();
+        }
     }
 }

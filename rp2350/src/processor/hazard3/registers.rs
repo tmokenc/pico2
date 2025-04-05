@@ -1,6 +1,6 @@
-pub(super) type Register = u8;
+pub type Register = u8;
 
-pub(super) trait RegisterValue {
+pub trait RegisterValue {
     fn as_u32(&self) -> u32;
     fn signed(&self) -> i32 {
         self.as_u32() as i32

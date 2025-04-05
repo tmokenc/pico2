@@ -1,5 +1,6 @@
 use crate::gpio::GpioPinValue;
 use super::*;
+use crate::utils::Fifo;
 use std::cell::RefCell;
 
 pub const UARTDR: u16 = 0x000; // Data Register, UARTDR
@@ -16,19 +17,50 @@ pub const UARTRIS: u16 = 0x03C; // Raw Interrupt Status Register, UARTRIS
 pub const UARTMIS: u16 = 0x040; // Masked Interrupt Status Register, UARTMIS
 pub const UARTICR: u16 = 0x044; // Interrupt Clear Register, UARTICR
 pub const UARTDMACR: u16 = 0x048; // DMA Control Register, UARTDMACR
-pub const UARTPeriphID0: u16 = 0xFE0; // UARTPeriphID0 Register
-pub const UARTPeriphID1: u16 = 0xFE4; // UARTPeriphID1 Register
-pub const UARTPeriphID2: u16 = 0xFE8; // UARTPeriphID2 Register
-pub const UARTPeriphID3: u16 = 0xFEC; // UARTPeriphID3 Register
-pub const UARTPCellID0: u16 = 0xFF0; // UARTPCellID0 Register
-pub const UARTPCellID1: u16 = 0xFF4; // UARTPCellID1 Register
-pub const UARTPCellID2: u16 = 0xFF8; // UARTPCellID2 Register
-pub const UARTPCellID3: u16 = 0xFFC; // UARTPCellID3 Register
+pub const UARTPERIPHID0: u16 = 0xFE0; // UARTPeriphID0 Register
+pub const UARTPERIPHID1: u16 = 0xFE4; // UARTPeriphID1 Register
+pub const UARTPERIPHID2: u16 = 0xFE8; // UARTPeriphID2 Register
+pub const UARTPERIPHID3: u16 = 0xFEC; // UARTPeriphID3 Register
+pub const UARTPCELLID0: u16 = 0xFF0; // UARTPCellID0 Register
+pub const UARTPCELLID1: u16 = 0xFF4; // UARTPCellID1 Register
+pub const UARTPCELLID2: u16 = 0xFF8; // UARTPCellID2 Register
+pub const UARTPCELLID3: u16 = 0xFFC; // UARTPCellID3 Register
 
-#[derive(Debug, Default)]
 pub struct Uart {
-    tx: GpioPinValue,
-    rx: GpioPinValue,
+    // receive are 12 bit wide
+    rx_fifo: Fifo<u16, 32>,
+    tx_fifo: Fifo<u8, 32>,
+
+    baud_divint: u16,
+    baud_divfrac: u8,
+    ctrl: u32,
+    line_ctrl: u32,
+
+    is_interrupting: bool,
+    pub tx: GpioPinValue,
+}
+
+impl Default for Uart {
+    fn default() -> Self {
+        Self {
+            rx_fifo: Fifo::default(),
+            tx_fifo: Fifo::default(),
+
+            baud_divint: 0,
+            baud_divfrac: 0,
+            ctrl: 0,
+            line_ctrl: 0,
+
+            is_interrupting: false,
+            tx: GpioPinValue::default(),
+        }
+    }
+}
+
+impl Uart {
+    fn update_baudrate(&mut self, divint: u16, divfrac: u8) {
+        todo!()
+    }
 }
 
 impl Peripheral for Uart {
@@ -38,8 +70,6 @@ impl Peripheral for Uart {
             | UARTRSR 
             | UARTFR 
             | UARTILPR 
-            | UARTIBRD 
-            | UARTFBRD 
             | UARTLCR_H 
             | UARTCR
             | UARTIFLS 
@@ -49,14 +79,17 @@ impl Peripheral for Uart {
             | UARTICR 
             | UARTDMACR => 0, // TODO
 
-            UARTPeriphID0 => 0x11,
-            UARTPeriphID1 => 0x1 << 4,
-            UARTPeriphID2 => (0x3 << 4) | 4,
-            UARTPeriphID3 => 0,
-            UARTPCellID0 => 0x0D,
-            UARTPCellID1 => 0xF0,
-            UARTPCellID2 => 0x05,
-            UARTPCellID3 => 0xB1,
+            UARTIBRD => self.baud_divint as u32,
+            UARTFBRD => self.baud_divfrac as u32,
+
+            UARTPERIPHID0 => 0x11,
+            UARTPERIPHID1 => 0x1 << 4,
+            UARTPERIPHID2 => (0x3 << 4) | 4,
+            UARTPERIPHID3 => 0,
+            UARTPCELLID0 => 0x0D,
+            UARTPCELLID1 => 0xF0,
+            UARTPCELLID2 => 0x05,
+            UARTPCELLID3 => 0xB1,
             _ => return Err(PeripheralError::OutOfBounds),
         };
 
@@ -74,19 +107,19 @@ impl Peripheral for Uart {
             | UARTRSR 
             | UARTFR 
             | UARTILPR 
-            | UARTIBRD 
-            | UARTFBRD 
             | UARTLCR_H 
             | UARTCR
             | UARTIFLS 
             | UARTIMSC 
-            | UARTRIS 
-            | UARTMIS 
             | UARTICR 
             | UARTDMACR => (), // TODO
 
-            UARTPeriphID0 | UARTPeriphID1 | UARTPeriphID2 | UARTPeriphID3 | UARTPCellID0
-            | UARTPCellID1 | UARTPCellID2 | UARTPCellID3 => (), // Ignore writes to read-only
+            UARTIBRD => self.update_baudrate(value as u16, self.baud_divfrac),
+            UARTFBRD => self.update_baudrate(self.baud_divint, value as u8),
+
+            UARTRIS | UARTMIS 
+            | UARTPERIPHID0 | UARTPERIPHID1 | UARTPERIPHID2 | UARTPERIPHID3 | UARTPCELLID0
+            | UARTPCELLID1 | UARTPCELLID2 | UARTPCELLID3 => (), // Ignore writes to read-only
                                                                // registers
 
             _ => return Err(PeripheralError::OutOfBounds),

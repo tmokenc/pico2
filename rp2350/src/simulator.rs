@@ -1,29 +1,23 @@
-use crate::clock::Clock;
-use crate::common::*;
-use crate::processor::Rp2350;
+pub mod pico2;
 
+pub use crate::rp2350::Rp2350;
+pub use pico2::Pico2;
+
+#[derive(Default)]
 pub struct Simulator {
-    clock: Clock<{ 150 * MHZ }>,
-    processor: Rp2350,
+    rp2350: Rp2350,
 }
+
+pub struct SimulatorController {}
 
 impl Simulator {
     pub fn new() -> Self {
-        todo!()
-        // Self {
-        //     clock: Clock::default(),
-        //     processor: Rp2350::new(),
-        //     rom: Memory::new(),
-        //     sram: Memory::new(),
-        //     cache_line: Memory::new(),
-        //     boot_ram: Memory::new(),
-        //     sio: Sio::default(),
-        // }
+        Default::default()
     }
 
-    pub fn run(&mut self) {
+    pub fn run(&mut self) -> SimulatorController {
         loop {
-            self.clock.tick();
+            self.rp2350.tick();
         }
     }
 

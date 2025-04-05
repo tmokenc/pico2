@@ -1,4 +1,8 @@
 use crate::common::*;
+use crate::gpio::GpioController;
+use crate::interrupts::Interrupts;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 pub mod bootram;
 pub mod busctrl;
@@ -76,6 +80,12 @@ pub struct Peripherals {
 }
 
 impl Peripherals {
+    pub fn new(gpio: Rc<RefCell<GpioController>>, interrupts: Rc<RefCell<Interrupts>>) -> Self {
+        Self {
+            ..Default::default()
+        }
+    }
+
     pub fn find_mut(&mut self, address: u32, requestor: Requestor) -> Option<&mut dyn Peripheral> {
         // TODO don't know if this address mask correct or not...
         // All I know for now is that it will not work correctly with
@@ -234,25 +244,10 @@ pub enum PeripheralError {
 
 pub type PeripheralResult<T> = std::result::Result<T, PeripheralError>;
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct PeripheralAccessContext {
     pub secure: bool,
     pub requestor: Requestor,
-}
-
-impl Default for PeripheralAccessContext {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl PeripheralAccessContext {
-    pub fn new() -> Self {
-        Self {
-            secure: true,
-            requestor: Requestor::Proc0,
-        }
-    }
 }
 
 // Purpose: Define the Peripheral trait and a default implementation for unimplemented peripherals.

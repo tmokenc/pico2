@@ -29,7 +29,7 @@ impl From<u32> for DriveStrength {
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[rustfmt::skip]
-enum FunctionSelect {
+pub enum FunctionSelect {
     #[default]
     None,
     SPI0_RX,
@@ -242,12 +242,26 @@ impl Default for GpioController {
     }
 }
 
+impl GpioController {
+    pub fn get_pin(&self, index: u8) -> &GpioPin {
+        &self.pins[index as usize]
+    }
+
+    pub fn get_pin_mut(&mut self, index: u8) -> &mut GpioPin {
+        &mut self.pins[index as usize]
+    }
+
+    pub fn select(&mut self, func: FunctionSelect) -> Option<&mut GpioPin> {
+        self.pins.iter_mut().find(|v| v.func_sel() == func)
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct GpioPin {
     ctrl: u32,
     pad: u32,
     index: usize,
-    value: GpioPinValue,
+    pub value: GpioPinValue,
 }
 
 impl GpioPin {

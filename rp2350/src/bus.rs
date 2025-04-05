@@ -1,4 +1,6 @@
 use crate::common::*;
+use crate::gpio::GpioController;
+use crate::interrupts::Interrupts;
 use crate::memory::*;
 use crate::peripherals::*;
 use crate::utils::*;
@@ -16,6 +18,9 @@ pub enum BusError {
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+/// Requestor for the bus (Core0, Core1, DMA)
+/// This is used to identify the source of the request
+/// As well as how it should be handled
 pub struct BusAccessContext {
     pub secure: bool,
     pub requestor: Requestor,
@@ -114,8 +119,11 @@ impl Bus {
     pub const SIO: u32 = 0xd000_0000;
     pub const CORTEX_M33_PRIVATE_REGISTERS: u32 = 0xe0000000;
 
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(gpio: Rc<RefCell<GpioController>>, interrupts: Rc<RefCell<Interrupts>>) -> Self {
+        Self {
+            peripherals: Peripherals::new(gpio, interrupts),
+            ..Default::default()
+        }
     }
 
     pub fn set_rom(&mut self, data: [u8; 32 * KB]) {
@@ -127,43 +135,48 @@ impl Bus {
     }
 
     pub fn tick(&mut self) {
-        if let Some(status) = self.dma_access.take() {
-            self.dma_access = self.update_status(status);
-        }
+        let mut core0_access = self.core0_access.take();
+        let mut core1_access = self.core1_access.take();
+        let mut dma_access = self.dma_access.take();
 
-        if let Some(status) = self.core0_access.take() {
-            self.core0_access = self.update_status(status);
-        }
-
-        if let Some(status) = self.core1_access.take() {
-            self.core1_access = self.update_status(status);
-        }
+        self.update_status(&mut core0_access);
+        self.update_status(&mut core1_access);
+        self.update_status(&mut dma_access);
+        self.core0_access = core0_access;
+        self.core1_access = core1_access;
+        self.dma_access = dma_access;
     }
 
-    fn update_status(&mut self, mut status: Status) -> Option<Status> {
+    fn update_status(&mut self, target_status: &mut Option<Status>) {
+        let Some(mut status) = target_status.take() else {
+            return;
+        };
+
         if status.wait_cycles > 1 {
             status.wait_cycles -= 1;
-            return Some(status);
+            *target_status = Some(status);
+            return;
         }
 
         match status.status {
             StatusType::Load(load_status) => {
                 let result = match status.ctx.size {
-                    DataSize::Byte => self.read_u8(status.address, &status.ctx).map(|v| {
+                    DataSize::Byte => self.read_u8(status.address, status.ctx).map(|v| {
                         if status.ctx.signed {
                             sign_extend(v as u32, 7)
                         } else {
                             v as u32
                         }
                     }),
-                    DataSize::HalfWord => self.read_u16(status.address, &status.ctx).map(|v| {
+                    DataSize::HalfWord => self.read_u16(status.address, status.ctx).map(|v| {
                         if status.ctx.signed {
                             sign_extend(v as u32, 15)
                         } else {
                             v as u32
                         }
                     }),
-                    DataSize::Word => self.read_u32(status.address, &status.ctx),
+
+                    DataSize::Word => self.read_u32(status.address, status.ctx),
                 };
 
                 *load_status.borrow_mut() = match result {
@@ -176,9 +189,9 @@ impl Bus {
 
             StatusType::Store(value, store_status) => {
                 let result = match status.ctx.size {
-                    DataSize::Byte => self.write_u8(status.address, value, &status.ctx),
-                    DataSize::HalfWord => self.write_u16(status.address, value, &status.ctx),
-                    DataSize::Word => self.write_u32(status.address, value, &status.ctx),
+                    DataSize::Byte => self.write_u8(status.address, value, status.ctx),
+                    DataSize::HalfWord => self.write_u16(status.address, value, status.ctx),
+                    DataSize::Word => self.write_u32(status.address, value, status.ctx),
                 };
                 *store_status.borrow_mut() = match result {
                     Ok(_) if status.ctx.exclusive => StoreStatus::ExclusiveDone,
@@ -188,8 +201,6 @@ impl Bus {
                 };
             }
         }
-
-        None
     }
 
     pub fn fetch(&mut self, address: u32) -> BusResult<u32> {
@@ -202,7 +213,14 @@ impl Bus {
             return Err(BusError::BusFault);
         }
 
-        self.read_u32(address, &Default::default())
+        let result = match address & 0xF000_0000 {
+            Self::ROM => self.rom.read_u32(address),
+            Self::SRAM => self.sram.read_u32(address - Self::SRAM),
+            Self::XIP => self.xip.read_u32(address - Self::XIP),
+            _ => return Err(BusError::BusFault),
+        };
+
+        result.map_err(|_| BusError::BusFault)
     }
 
     /// Call by a load instruction
@@ -221,9 +239,9 @@ impl Bus {
         let load_status = Rc::new(RefCell::new(LoadStatus::Waiting));
 
         let status = Status {
+            ctx,
             address,
             wait_cycles: self.address_cycle(address).0,
-            ctx: ctx,
             status: StatusType::Load(Rc::clone(&load_status)),
         };
 
@@ -253,9 +271,9 @@ impl Bus {
         let store_status = Rc::new(RefCell::new(StoreStatus::Waiting));
 
         let status = Status {
+            ctx,
             address,
             wait_cycles: self.address_cycle(address).1,
-            ctx: ctx,
             status: StatusType::Store(value, Rc::clone(&store_status)),
         };
 
@@ -317,8 +335,8 @@ impl Bus {
         }
     }
 
-    fn read_u32(&mut self, address: u32, ctx: &BusAccessContext) -> BusResult<u32> {
-        if !self.is_address_free(address, ctx) {
+    fn read_u32(&mut self, address: u32, ctx: BusAccessContext) -> BusResult<u32> {
+        if !self.is_address_free(address, &ctx) {
             return Err(BusError::ConcurrentAccess);
         }
 
@@ -336,9 +354,10 @@ impl Bus {
             Self::SRAM => Ok(self.sram.read_u32(address - Self::SRAM)?),
             Self::XIP => Ok(self.xip.read_u32(address - Self::XIP)?),
             _ => {
-                let mut peri_ctx = PeripheralAccessContext::new();
-                peri_ctx.secure = ctx.secure;
-                peri_ctx.requestor = ctx.requestor;
+                let peri_ctx = PeripheralAccessContext {
+                    secure: ctx.secure,
+                    requestor: ctx.requestor,
+                };
 
                 self.peripherals
                     .find(address, ctx.requestor)
@@ -349,8 +368,8 @@ impl Bus {
         }
     }
 
-    fn write_u32(&mut self, address: u32, value: u32, ctx: &BusAccessContext) -> BusResult<()> {
-        if !self.is_address_free(address, ctx) {
+    fn write_u32(&mut self, address: u32, value: u32, ctx: BusAccessContext) -> BusResult<()> {
+        if !self.is_address_free(address, &ctx) {
             return Err(BusError::ConcurrentAccess);
         }
 
@@ -369,9 +388,10 @@ impl Bus {
             Self::SRAM => self.sram.write_u32(address - Self::SRAM, value)?,
             Self::XIP => self.xip.write_u32(address - Self::XIP, value)?,
             _ => {
-                let mut peri_ctx = PeripheralAccessContext::new();
-                peri_ctx.secure = ctx.secure;
-                peri_ctx.requestor = ctx.requestor;
+                let peri_ctx = PeripheralAccessContext {
+                    secure: ctx.secure,
+                    requestor: ctx.requestor,
+                };
 
                 self.peripherals
                     .find_mut(address, ctx.requestor)
@@ -384,7 +404,7 @@ impl Bus {
         Ok(())
     }
 
-    fn read_u16(&mut self, address: u32, ctx: &BusAccessContext) -> BusResult<u16> {
+    fn read_u16(&mut self, address: u32, ctx: BusAccessContext) -> BusResult<u16> {
         match address & 0xF000_0000 {
             Self::ROM => Ok(self.rom.read_u16(address)?),
             Self::SRAM => Ok(self.sram.read_u16(address - Self::SRAM)?),
@@ -400,7 +420,7 @@ impl Bus {
         }
     }
 
-    fn write_u16(&mut self, address: u32, value: u32, ctx: &BusAccessContext) -> BusResult<()> {
+    fn write_u16(&mut self, address: u32, value: u32, ctx: BusAccessContext) -> BusResult<()> {
         match address & 0xF000_0000 {
             Self::ROM => self.rom.write_u16(address, value as u16)?,
             Self::SRAM => self.sram.write_u16(address - Self::SRAM, value as u16)?,
@@ -419,7 +439,7 @@ impl Bus {
         Ok(())
     }
 
-    fn read_u8(&mut self, address: u32, ctx: &BusAccessContext) -> BusResult<u8> {
+    fn read_u8(&mut self, address: u32, ctx: BusAccessContext) -> BusResult<u8> {
         match address & 0xF000_0000 {
             Self::ROM => Ok(self.rom.read_u8(address)?),
             Self::SRAM => Ok(self.sram.read_u8(address - Self::SRAM)?),
@@ -432,7 +452,7 @@ impl Bus {
         }
     }
 
-    fn write_u8(&mut self, address: u32, value: u32, ctx: &BusAccessContext) -> BusResult<()> {
+    fn write_u8(&mut self, address: u32, value: u32, ctx: BusAccessContext) -> BusResult<()> {
         match address & 0xF000_0000 {
             Self::ROM => self.rom.write_u8(address, value as u8)?,
             Self::SRAM => self.sram.write_u8(address - Self::SRAM, value as u8)?,
@@ -459,34 +479,43 @@ impl Bus {
 mod tests {
     use super::*;
 
+    macro_rules! setup {
+        ($bus:ident) => {
+            let mut $bus = Bus::new(
+                Rc::new(RefCell::new(GpioController::default())),
+                Rc::new(RefCell::new(Interrupts::default())),
+            );
+        };
+    }
+
     #[test]
     fn fetch() {
-        let mut bus = Bus::default();
+        setup!(bus);
         let address = Bus::SRAM;
         let value = 0x1234_5678;
-        bus.write_u32(address, value, &Default::default()).unwrap();
+        bus.write_u32(address, value, Default::default()).unwrap();
 
         assert_eq!(bus.fetch(address), Ok(value));
     }
 
     #[test]
     fn fetch_error() {
-        let mut bus = Bus::default();
+        setup!(bus);
         let address = 0x4000_0000;
         assert_eq!(bus.fetch(address), Err(BusError::BusFault));
     }
 
-    // #[test]
-    // fn load() {
-    //     let mut bus = Bus::default();
-    //     let address = Bus::SRAM;
-    //     let value = 0x1234_5678;
-    //     bus.write_u32(address, value).unwrap();
+    #[test]
+    fn load() {
+        setup!(bus);
+        let address = Bus::SRAM;
+        let value = 0x1234_5678;
+        bus.write_u32(address, value, Default::default()).unwrap();
 
-    //     let status = bus.load(address, DataSize::Word).unwrap();
-    //     assert_eq!(*status.borrow(), LoadStatus::Waiting);
+        let status = bus.load(address, Default::default()).unwrap();
+        assert_eq!(*status.borrow(), LoadStatus::Waiting);
 
-    //     bus.tick();
-    //     assert_eq!(*status.borrow(), LoadStatus::Word(value));
-    // }
+        bus.tick();
+        assert_eq!(*status.borrow(), LoadStatus::Done(value));
+    }
 }

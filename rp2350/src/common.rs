@@ -37,3 +37,8 @@ impl Requestor {
         matches!(self, Requestor::Proc0 | Requestor::Proc1)
     }
 }
+
+pub enum LedState {
+    On,
+    Off,
+}
