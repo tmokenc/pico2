@@ -1,0 +1,15 @@
+services:
+  pico2-server:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: pico2-server
+    volumes:
+      - .:/workspace
+    ports:
+      - "8080:8080"
+    working_dir: /workspace
+    environment:
+      - RUST_LOG=info
+      - CARGO_TARGET_DIR=/build
+    command: ["sh", "-c", "trunk build --release --config web/Trunk.toml && cargo run --release --bin server"]
