@@ -1,14 +1,16 @@
 mod exec;
 // pub mod instruction;
-pub(crate) mod csrs;
+pub mod branch_predictor;
+pub mod csrs;
 pub(crate) mod instruction_format;
-pub(crate) mod registers;
+pub mod registers;
 pub(crate) mod trap;
 
 use super::{CpuArchitecture, ProcessorContext, Stats};
 use crate::bus::{BusAccessContext, LoadStatus, StoreStatus};
 use crate::common::*;
 use crate::interrupts::Interrupts;
+use branch_predictor::BranchPredictor;
 use core::mem;
 use csrs::Csrs;
 pub use csrs::PrivilegeMode;
@@ -70,6 +72,8 @@ pub struct Hazard3 {
     // should be clear after any atomic instruction, or SC.W or getting a trap
     pub local_monitor_bit: bool,
 
+    pub branch_predictor: BranchPredictor,
+
     // Zcmp extension
     // Some instructions may expand into a sequence of multiple instructions
     pub(self) inst_seq: InstructionSequence,
@@ -86,12 +90,13 @@ impl Hazard3 {
     pub fn new(interrupts: Rc<RefCell<Interrupts>>) -> Self {
         Self {
             interrupts,
-            pc: 0x6aac, // or 0x6a2c
+            pc: 0x7642, // entry point for the RISC-V bootloader
             state: State::default(),
             registers: Registers::default(),
             csrs: Csrs::default(),
             xx_bypass: None,
             local_monitor_bit: false,
+            branch_predictor: BranchPredictor::default(),
             monitor: false,
             inst_seq: InstructionSequence::default(),
             count_instructions: None,
@@ -114,6 +119,7 @@ impl CpuArchitecture for Hazard3 {
 
     fn tick(&mut self, ctx: &mut ProcessorContext) {
         if let State::Sleep(_) = self.state {
+            log::trace!("Processor is sleeping");
             return;
         }
 
@@ -164,6 +170,13 @@ impl CpuArchitecture for Hazard3 {
         if self.monitor {
             self.instruction_log(inst_code, instruction_name);
         }
+
+        log::info!(
+            "PC: 0x{:08x} Instruction: 0x{:08x} Name: {}",
+            self.pc,
+            inst_code,
+            instruction_name,
+        );
 
         self.csrs.tick();
 
