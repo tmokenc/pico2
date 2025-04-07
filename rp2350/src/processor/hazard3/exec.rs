@@ -16,7 +16,8 @@ const OPCODE_STORE: u32 = 0b0100011;
 const OPCODE_ARITHMETIC_IMM: u32 = 0b0010011;
 const OPCODE_AIRTHMETIC_REG: u32 = 0b0110011;
 const OPCODE_BRANCH: u32 = 0b1100011;
-const OPCODE_CUSTOM0: u32 = 0b0101111;
+const OPCODE_ATOMIC: u32 = 0b0101111;
+const OPCODE_CUSTOM0: u32 = 0b0001011;
 
 const OPCODE_JAL: u32 = 0b1101111;
 const OPCODE_JALR: u32 = 0b1100111;
@@ -24,7 +25,7 @@ const OPCODE_LUI: u32 = 0b0110111;
 const OPCODE_AUIPC: u32 = 0b0010111;
 
 // compressed instructions always have opcode and func3 part of the instruction
-const OPCODE_COMPRESSED_MASK: u16 = 0b00 | 0b111 << 13;
+const OPCODE_COMPRESSED_MASK: u16 = 0b11 | 0b111 << 13;
 
 const fn func3(code: u32) -> u32 {
     code >> 12 & 0b111
@@ -90,7 +91,6 @@ pub(super) struct ExecContext<'a> {
     pub(super) core: &'a mut Hazard3,
     pub(super) instruction_name: &'static str,
     pub(super) wake_opposite_core: bool,
-    pub(super) mret: bool,
     pub(super) zcmp_actions: InstructionSequence,
 }
 
@@ -106,7 +106,6 @@ impl ExecContext<'_> {
             memory_access: MemoryAccess::None,
             zcmp_actions: Fifo::default(),
             wake_opposite_core: false,
-            mret: false,
             core,
             bus,
         }
@@ -288,7 +287,15 @@ impl ExecContext<'_> {
     }
 
     fn branch(&mut self, taken: bool, label: impl AsPrimitive<i32>) {
-        // TODO branch prediction
+        if self
+            .core
+            .branch_predictor
+            .miss_predicted(self.core.pc, taken)
+        {
+            // cost of misprediction
+            self.cycles += 1;
+        }
+
         if taken {
             self.set_next_pc_offset(label);
         }
@@ -300,10 +307,6 @@ impl ExecContext<'_> {
 
     fn wfi(&mut self) {
         self.core.state = State::Wfi;
-    }
-
-    fn mret(&mut self) {
-        self.mret = true;
     }
 
     fn add_zcmp_action(&mut self, action: ZcmpAction) {
@@ -663,11 +666,12 @@ fn exec_arit_imm_instruction(code: u32, ctx: &mut ExecContext) {
         }
         (0b101, 0b0110000) => {
             ctx.inst_name("RORI");
-            ctx.write_register(rd, (a >> shamt) | (a << (32 - shamt)));
+            ctx.write_register(rd, a.rotate_right(shamt));
+            // ctx.write_register(rd, (a >> shamt) | (a << (32 - shamt)));
         }
 
         // Zbkb
-        (0b101, 0b0000100) if rs2 == 0b00111 => {
+        (0b101, 0b0110100) if rs2 == 0b00111 => {
             ctx.inst_name("BREV8");
             let mut bytes = a.to_le_bytes();
 
@@ -677,7 +681,7 @@ fn exec_arit_imm_instruction(code: u32, ctx: &mut ExecContext) {
 
             ctx.write_register(rd, u32::from_le_bytes(bytes));
         }
-        (0b101, 0b0010100) if rs2 == 0b01111 => {
+        (0b101, 0b0000100) if rs2 == 0b01111 => {
             ctx.inst_name("UNZIP");
             let mut result = 0;
 
@@ -688,7 +692,7 @@ fn exec_arit_imm_instruction(code: u32, ctx: &mut ExecContext) {
 
             ctx.write_register(rd, result);
         }
-        (0b001, 0b0100100) if rs2 == 0b01111 => {
+        (0b001, 0b0000100) if rs2 == 0b01111 => {
             ctx.inst_name("ZIP");
             let mut result = 0;
 
@@ -871,12 +875,14 @@ fn exec_arit_reg_instruction(code: u32, ctx: &mut ExecContext) {
         (0b001, 0b0110000) => {
             ctx.inst_name("ROL");
             let shamt = b & 0b11111;
-            ctx.write_register(rd, (a << shamt) | (a >> (32 - shamt)));
+            ctx.write_register(rd, a.rotate_left(shamt));
+            // ctx.write_register(rd, (a << shamt) | (a >> (32 - shamt)));
         }
         (0b101, 0b0110000) => {
             ctx.inst_name("ROR");
             let shamt = b & 0b11111;
-            ctx.write_register(rd, (a >> shamt) | (a << (32 - shamt)));
+            ctx.write_register(rd, a.rotate_right(shamt));
+            // ctx.write_register(rd, (a >> shamt) | (a << (32 - shamt)));
         }
         (0b100, 0b0100000) => {
             ctx.inst_name("XNOR");
@@ -945,39 +951,9 @@ fn exec_branch_instruction(code: u32, ctx: &mut ExecContext) {
 fn exec_atomic_instruction(code: u32, ctx: &mut ExecContext) {
     let func3 = func3(code);
 
-    match func3 {
-        0b000 | 0b100 => {
-            ctx.inst_name("H3.BEXTM");
-            let func7 = func7(code);
-
-            // func7[0] and func7[6:4] must be 0
-            let mask = 0b111 << 4 | 0b1;
-            if func7 & mask != 0 {
-                ctx.raise_exception(Exception::IllegalInstruction);
-                return;
-            }
-
-            let RType { rd, rs1, rs2 } = code.into();
-            let size = extract_bits(func7, 1..=3) + 1;
-
-            let a = ctx.read_register(rs1);
-
-            let shamt = if func3 == 0b000 {
-                ctx.read_register(rs2) & 0b11111
-            } else {
-                rs2 as u32
-            };
-
-            let result = (a >> shamt) & !(((-1i32) as u32) << size);
-            ctx.write_register(rd, result);
-            return;
-        }
-
-        0b010 => {} // Atomic instructions
-        _ => {
-            ctx.raise_exception(Exception::IllegalInstruction);
-            return;
-        }
+    if func3 != 0b010 {
+        ctx.raise_exception(Exception::IllegalInstruction);
+        return;
     }
 
     let RType { rd, rs1, rs2 } = code.into();
@@ -1063,7 +1039,7 @@ fn exec_compressed_instruction(code: u16, ctx: &mut ExecContext) {
                 + (extract_bit(code, 6) << 2)
                 + (extract_bit(code, 5) << 3);
 
-            if (nzuimm == 0) {
+            if nzuimm == 0 {
                 ctx.raise_exception(Exception::IllegalInstruction);
                 return;
             }
@@ -1128,8 +1104,8 @@ fn exec_compressed_instruction(code: u16, ctx: &mut ExecContext) {
             }
 
             if rd == 2 {
-                // ADDI16SPN
-                ctx.inst_name("C.ADDI16SPN");
+                // ADDI16SP
+                ctx.inst_name("C.ADDI16SP");
                 let imm = (extract_bit(code, 6) << 4)
                     | (extract_bit(code, 5) << 6)
                     | (extract_bits(code, 3..=4) << 7)
@@ -1143,7 +1119,7 @@ fn exec_compressed_instruction(code: u16, ctx: &mut ExecContext) {
                 let imm = ((extract_bits(code, 2..=6) as u32) << 12)
                     | (extract_bits(code, 12..=12) as u32) << 17;
                 let imm_signed = sign_extend(imm, 17);
-                ctx.write_register(rd, imm);
+                ctx.write_register(rd, imm_signed);
             }
         }
         0b1000000000000001 => {
@@ -1192,6 +1168,36 @@ fn exec_compressed_instruction(code: u16, ctx: &mut ExecContext) {
                         _ => ctx.raise_exception(Exception::IllegalInstruction),
                     }
                 }
+                0b111 => match (code >> 2) & 0b11111 {
+                    0b11000 => {
+                        ctx.inst_name("C.ZEXT.B");
+                        ctx.write_register(rd, rd_value & 0xff);
+                    }
+                    0b11001 => {
+                        ctx.inst_name("C.SEXT.B");
+                        ctx.write_register(rd, sign_extend(rd_value, 7));
+                    }
+                    0b11010 => {
+                        ctx.inst_name("C.ZEXT.H");
+                        ctx.write_register(rd, rd_value & 0xffff);
+                    }
+                    0b11011 => {
+                        ctx.inst_name("C.SEXT.H");
+                        ctx.write_register(rd, sign_extend(rd_value, 15));
+                    }
+                    0b11101 => {
+                        ctx.inst_name("C.NOT");
+                        ctx.write_register(rd, !rd_value);
+                    }
+                    v if v >= 0b10000 && v < 0b11000 => {
+                        ctx.inst_name("C.MUL");
+                        let rs2 = crs2_(code);
+                        let a = rd as u32;
+                        let b = ctx.read_register(rs2);
+                        ctx.write_register(rd, a.wrapping_mul(b));
+                    }
+                    _ => ctx.raise_exception(Exception::IllegalInstruction),
+                },
                 _ => ctx.raise_exception(Exception::IllegalInstruction),
             }
         }
@@ -1223,14 +1229,15 @@ fn exec_compressed_instruction(code: u16, ctx: &mut ExecContext) {
         0b1000000000000010 if extract_bit(code, 12) == 0 => {
             let rs2 = crs2(code);
             let rs1 = crs1(code);
+
             // JR if rs2 == 0, if JR and rs1 == 0, reserved
+            if rs1 == 0 {
+                ctx.raise_exception(Exception::IllegalInstruction);
+                return;
+            }
+
             if rs2 == 0 {
                 ctx.inst_name("C.JR");
-                if rs1 == 0 {
-                    ctx.raise_exception(Exception::IllegalInstruction);
-                    return;
-                }
-
                 let new_pc = ctx.read_register(rs1) & !1; // clear LSB
                 ctx.set_absolute_pc_value(new_pc as u32);
             } else {
@@ -1239,7 +1246,7 @@ fn exec_compressed_instruction(code: u16, ctx: &mut ExecContext) {
                 ctx.write_register(rs1, value);
             }
         }
-        0b1000000000000010 => {
+        0b1000000000000010 if extract_bit(code, 12) == 1 => {
             // ADD
             // JALR if !rs2
             // EBREAK if !rs1 && !rs2
@@ -1335,42 +1342,6 @@ fn exec_compressed_instruction(code: u16, ctx: &mut ExecContext) {
             }
         }
 
-        0b1000000000000001 if extract_bits(code, 10..=12) == 0b111 => {
-            let rd = crs1_(code);
-            let value = ctx.read_register(rd);
-
-            match (code >> 2) & 0b11111 {
-                0b11000 => {
-                    ctx.inst_name("C.ZEXT.B");
-                    ctx.write_register(rd, value & 0xff);
-                }
-                0b11001 => {
-                    ctx.inst_name("C.SEXT.B");
-                    ctx.write_register(rd, sign_extend(value, 7));
-                }
-                0b11010 => {
-                    ctx.inst_name("C.ZEXT.H");
-                    ctx.write_register(rd, value & 0xffff);
-                }
-                0b11011 => {
-                    ctx.inst_name("C.SEXT.H");
-                    ctx.write_register(rd, sign_extend(value, 15));
-                }
-                0b11101 => {
-                    ctx.inst_name("C.NOT");
-                    ctx.write_register(rd, !value);
-                }
-                v if v >= 0b10000 && v < 0b11000 => {
-                    ctx.inst_name("C.MUL");
-                    let rs2 = crs2_(code);
-                    let a = rd as u32;
-                    let b = ctx.read_register(rs2);
-                    ctx.write_register(rd, a.wrapping_mul(b));
-                }
-                _ => ctx.raise_exception(Exception::IllegalInstruction),
-            }
-        }
-
         0b1010000000000010 => {
             if extract_bit(code, 12) == 0 {
                 let r1s = extract_bits(code, 7..=9) as Register;
@@ -1385,12 +1356,12 @@ fn exec_compressed_instruction(code: u16, ctx: &mut ExecContext) {
                 let xreg2 = zcmp_s_mapping(r2s);
 
                 match code & 0b0000110001100000 {
-                    0b110000100000 => {
+                    0b0110000100000 => {
                         ctx.inst_name("CM.MVSA01");
                         ctx.add_zcmp_action(ZcmpAction::RegisterMove(10, xreg1));
                         ctx.add_zcmp_action(ZcmpAction::RegisterMove(11, xreg2));
                     }
-                    0b110001100000 => {
+                    0b0110001100000 => {
                         ctx.inst_name("CM.MVA01S");
                         ctx.add_zcmp_action(ZcmpAction::RegisterMove(xreg1, 10));
                         ctx.add_zcmp_action(ZcmpAction::RegisterMove(xreg2, 11));
@@ -1427,8 +1398,50 @@ fn exec_compressed_instruction(code: u16, ctx: &mut ExecContext) {
     }
 }
 
+#[inline]
+fn exec_custom_instruction(code: u32, ctx: &mut ExecContext) {
+    let func3 = func3(code);
+    let func7 = func7(code);
+
+    if func3 != 0b000 && func3 != 0b100 {
+        ctx.raise_exception(Exception::IllegalInstruction);
+        return;
+    }
+
+    // func7[0] and func7[6:4] must be 0
+    let mask = 0b111 << 4 | 0b1;
+    if func7 & mask != 0 {
+        ctx.raise_exception(Exception::IllegalInstruction);
+        return;
+    }
+
+    let RType { rd, rs1, rs2 } = code.into();
+
+    let shamt = match func3 {
+        0b000 => {
+            ctx.inst_name("H3.BEXTM");
+            ctx.read_register(rs2) & 0b11111
+        }
+        0b100 => {
+            ctx.inst_name("H3.BEXTMI");
+            rs2 as u32
+        }
+        _ => {
+            ctx.raise_exception(Exception::IllegalInstruction);
+            return;
+        }
+    };
+
+    let size = extract_bits(func7, 1..=3) + 1;
+    let a = ctx.read_register(rs1);
+
+    let result = (a >> shamt) & !(((-1i32) as u32) << size);
+    ctx.write_register(rd, result);
+}
+
 pub(super) fn exec_instruction(code: u32, ctx: &mut ExecContext<'_>) {
     if code & 0b11 == 0b11 {
+        log::info!("Normal instruction: {:#x}", code);
         ctx.set_next_pc_offset(4);
         match code & OPCODE_MASK {
             OPCODE_JAL => {
@@ -1475,7 +1488,8 @@ pub(super) fn exec_instruction(code: u32, ctx: &mut ExecContext<'_>) {
             OPCODE_ARITHMETIC_IMM => exec_arit_imm_instruction(code, ctx),
             OPCODE_AIRTHMETIC_REG => exec_arit_reg_instruction(code, ctx),
             OPCODE_BRANCH => exec_branch_instruction(code, ctx),
-            OPCODE_CUSTOM0 => exec_atomic_instruction(code, ctx),
+            OPCODE_ATOMIC => exec_atomic_instruction(code, ctx),
+            OPCODE_CUSTOM0 => exec_custom_instruction(code, ctx),
             _ if code == 0b00000000000000000001000000001111 => {
                 ctx.inst_name("FENCE.I");
                 // Do nothing
@@ -1495,6 +1509,7 @@ pub(super) fn exec_instruction(code: u32, ctx: &mut ExecContext<'_>) {
             _ => ctx.raise_exception(Exception::IllegalInstruction),
         }
     } else {
+        log::info!("Compressed instruction: {:#x}", code as u16);
         ctx.set_next_pc_offset(2);
         exec_compressed_instruction(code as u16, ctx);
     }
@@ -1642,6 +1657,168 @@ mod tests {
                 }
             }
         };
+    }
+
+    #[test]
+    // happy path for all instructions
+    fn base_instruction_test() {
+        let instruction_list = [
+            ("BEQ", 0b00000000000000000000000001100011),
+            ("BNE", 0b00000000000000000001000001100011),
+            ("BLT", 0b00000000000000000100000001100011),
+            ("BGE", 0b00000000000000000101000001100011),
+            ("BLTU", 0b00000000000000000110000001100011),
+            ("BGEU", 0b00000000000000000111000001100011),
+            ("JALR", 0b00000000000000000000000001100111),
+            ("JAL", 0b00000000000000000000000001101111),
+            ("LUI", 0b00000000000000000000000000110111),
+            ("AUIPC", 0b00000000000000000000000000010111),
+            ("ADDI", 0b00000000000000000000000000010011),
+            ("SLLI", 0b00000000000000000001000000010011),
+            ("SLTI", 0b00000000000000000010000000010011),
+            ("SLTIU", 0b00000000000000000011000000010011),
+            ("XORI", 0b00000000000000000100000000010011),
+            ("SRLI", 0b00000000000000000101000000010011),
+            ("SRAI", 0b01000000000000000101000000010011),
+            ("ORI", 0b00000000000000000110000000010011),
+            ("ANDI", 0b00000000000000000111000000010011),
+            ("ADD", 0b00000000000000000000000000110011),
+            ("SUB", 0b01000000000000000000000000110011),
+            ("SLL", 0b00000000000000000001000000110011),
+            ("SLT", 0b00000000000000000010000000110011),
+            ("SLTU", 0b00000000000000000011000000110011),
+            ("XOR", 0b00000000000000000100000000110011),
+            ("SRL", 0b00000000000000000101000000110011),
+            ("SRA", 0b01000000000000000101000000110011),
+            ("OR", 0b00000000000000000110000000110011),
+            ("AND", 0b00000000000000000111000000110011),
+            ("LB", 0b00000000000000000000000000000011),
+            ("LH", 0b00000000000000000001000000000011),
+            ("LW", 0b00000000000000000010000000000011),
+            ("LBU", 0b00000000000000000100000000000011),
+            ("LHU", 0b00000000000000000101000000000011),
+            ("SB", 0b00000000000000000000000000100011),
+            ("SH", 0b00000000000000000001000000100011),
+            ("SW", 0b00000000000000000010000000100011),
+            ("FENCE", 0b00000000000000000000000000001111),
+            ("FENCE.I", 0b00000000000000000001000000001111),
+            ("ECALL", 0b00000000000000000000000001110011),
+            ("EBREAK", 0b00000000000100000000000001110011),
+            ("CSRRW", 0b00000000000000000001000001110011),
+            ("CSRRS", 0b00000000000000000010000001110011),
+            ("CSRRC", 0b00000000000000000011000001110011),
+            ("CSRRWI", 0b00000000000000000101000001110011),
+            ("CSRRSI", 0b00000000000000000110000001110011),
+            ("CSRRCI", 0b00000000000000000111000001110011),
+            ("MRET", 0b00110000001000000000000001110011),
+            ("WFI", 0b00010000010100000000000001110011),
+            ("MUL", 0b00000010000000000000000000110011),
+            ("MULH", 0b00000010000000000001000000110011),
+            ("MULHSU", 0b00000010000000000010000000110011),
+            ("MULHU", 0b00000010000000000011000000110011),
+            ("DIV", 0b00000010000000000100000000110011),
+            ("DIVU", 0b00000010000000000101000000110011),
+            ("REM", 0b00000010000000000110000000110011),
+            ("REMU", 0b00000010000000000111000000110011),
+            ("LR.W", 0b00010000000000000010000000101111),
+            ("SC.W", 0b00011000000000000010000000101111),
+            ("AMOSWAP.W", 0b00001000000000000010000000101111),
+            ("AMOADD.W", 0b00000000000000000010000000101111),
+            ("AMOXOR.W", 0b00100000000000000010000000101111),
+            ("AMOAND.W", 0b01100000000000000010000000101111),
+            ("AMOOR.W", 0b01000000000000000010000000101111),
+            ("AMOMIN.W", 0b10000000000000000010000000101111),
+            ("AMOMAX.W", 0b10100000000000000010000000101111),
+            ("AMOMINU.W", 0b11000000000000000010000000101111),
+            ("AMOMAXU.W", 0b11100000000000000010000000101111),
+            ("SH1ADD", 0b00100000000000000010000000110011),
+            ("SH2ADD", 0b00100000000000000100000000110011),
+            ("SH3ADD", 0b00100000000000000110000000110011),
+            ("ANDN", 0b01000000000000000111000000110011),
+            ("CLZ", 0b01100000000000000001000000010011),
+            ("CPOP", 0b01100000001000000001000000010011),
+            ("CTZ", 0b01100000000100000001000000010011),
+            ("MAX", 0b00001010000000000110000000110011),
+            ("MAXU", 0b00001010000000000111000000110011),
+            ("MIN", 0b00001010000000000100000000110011),
+            ("MINU", 0b00001010000000000101000000110011),
+            ("ORC.B", 0b00101000011100000101000000010011),
+            ("ORN", 0b01000000000000000110000000110011),
+            ("REV8", 0b01101001100000000101000000010011),
+            ("ROL", 0b01100000000000000001000000110011),
+            ("ROR", 0b01100000000000000101000000110011),
+            ("RORI", 0b01100000000000000101000000010011),
+            ("SEXT.B", 0b01100000010000000001000000010011),
+            ("SEXT.H", 0b01100000010100000001000000010011),
+            ("XNOR", 0b01000000000000000100000000110011),
+            ("ZEXT.H", 0b00001000000000000100000000110011),
+            ("BCLR", 0b01001000000000000001000000110011),
+            ("BCLRI", 0b01001000000000000001000000010011),
+            ("BEXT", 0b01001000000000000101000000110011),
+            ("BEXTI", 0b01001000000000000101000000010011),
+            ("BINV", 0b01101000000000000001000000110011),
+            ("BINVI", 0b01101000000000000001000000010011),
+            ("BSET", 0b00101000000000000001000000110011),
+            ("BSETI", 0b00101000000000000001000000010011),
+            ("PACK", 0b00001000100000000100000000110011),
+            ("PACKH", 0b00001000000000000111000000110011),
+            ("BREV8", 0b01101000011100000101000000010011),
+            ("UNZIP", 0b00001000111100000101000000010011),
+            ("ZIP", 0b00001000111100000001000000010011),
+            ("H3.BEXTM", 0b00000000000000000000000000001011),
+            ("H3.BEXTMI", 0b00000000000000000100000000001011),
+            ("C.ADDI4SPN", 0b0000000001000000),
+            ("C.LW", 0b0100000000000000),
+            ("C.SW", 0b1100000000000000),
+            ("C.ADDI", 0b0000000000000001),
+            ("C.JAL", 0b0010000000000001),
+            ("C.J", 0b1010000000000001),
+            ("C.LI", 0b0100000000000001),
+            ("C.LUI", 0b0110010000000101),
+            ("C.ADDI16SP", 0b0110000101000001),
+            ("C.SRLI", 0b1000000000000001),
+            ("C.SRAI", 0b1000010000000001),
+            ("C.ANDI", 0b1000100000000001),
+            ("C.SUB", 0b1000110000000001),
+            ("C.XOR", 0b1000110000100001),
+            ("C.OR", 0b1000110001000001),
+            ("C.AND", 0b1000110001100001),
+            ("C.BEQZ", 0b1100000000000001),
+            ("C.BNEZ", 0b1110000000000001),
+            ("C.SLLI", 0b0000000000000010),
+            ("C.MV", 0b1000010000100010),
+            ("C.JR", 0b1000010000000010),
+            ("C.ADD", 0b1001010001001010),
+            ("C.JALR", 0b1001010000000010),
+            ("C.EBREAK", 0b1001000000000010),
+            ("C.LWSP", 0b0100000000000010),
+            ("C.SWSP", 0b1100000000000010),
+            ("C.LBU", 0b1000000000000000),
+            ("C.LHU", 0b1000010000000000),
+            ("C.LH", 0b1000010001000000),
+            ("C.SB", 0b1000100000000000),
+            ("C.SH", 0b1000110000000000),
+            ("C.ZEXT.B", 0b1001110001100001),
+            ("C.SEXT.B", 0b1001110001100101),
+            ("C.ZEXT.H", 0b1001110001101001),
+            ("C.SEXT.H", 0b1001110001101101),
+            ("C.NOT", 0b1001110001110101),
+            ("C.MUL", 0b1001110001000001),
+            ("CM.PUSH", 0b1011100000000010),
+            ("CM.POP", 0b1011101000000010),
+            ("CM.POPRETZ", 0b1011110000000010),
+            ("CM.POPRET", 0b1011111000000010),
+            ("CM.MVSA01", 0b1010110100100010),
+            ("CM.MVA01S", 0b1010110001101010),
+        ];
+
+        setup!(core, bus);
+
+        for (instruction, code) in instruction_list.iter() {
+            let mut ctx = ExecContext::new(&mut core, &mut bus);
+            exec_instruction(*code, &mut ctx);
+            assert_eq!(ctx.instruction_name, *instruction);
+        }
     }
 
     instruction_test!(lui, 0b00000001100100100101111110110111, ctx, {
