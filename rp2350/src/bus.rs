@@ -422,7 +422,7 @@ impl Bus {
 
     fn write_u16(&mut self, address: u32, value: u32, ctx: BusAccessContext) -> BusResult<()> {
         match address & 0xF000_0000 {
-            Self::ROM => self.rom.write_u16(address, value as u16)?,
+            Self::ROM => (),
             Self::SRAM => self.sram.write_u16(address - Self::SRAM, value as u16)?,
             Self::XIP => self.xip.write_u16(address - Self::XIP, value as u16)?,
             _ => {
@@ -454,7 +454,7 @@ impl Bus {
 
     fn write_u8(&mut self, address: u32, value: u32, ctx: BusAccessContext) -> BusResult<()> {
         match address & 0xF000_0000 {
-            Self::ROM => self.rom.write_u8(address, value as u8)?,
+            Self::ROM => (),
             Self::SRAM => self.sram.write_u8(address - Self::SRAM, value as u8)?,
             Self::XIP => self.xip.write_u8(address - Self::XIP, value as u8)?,
             _ => {
