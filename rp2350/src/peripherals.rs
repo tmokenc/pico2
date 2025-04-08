@@ -8,14 +8,18 @@ pub mod bootram;
 pub mod busctrl;
 pub mod clocks;
 pub mod dma;
+pub mod reset;
 pub mod sio;
+pub mod trng;
 pub mod uart;
 
 pub use bootram::BootRam;
 pub use busctrl::BusCtrl;
 pub use clocks::Clocks;
 pub use dma::Dma;
+pub use reset::Reset;
 pub use sio::Sio;
+pub use trng::Trng;
 pub use uart::Uart;
 
 #[derive(Default)]
@@ -25,7 +29,7 @@ pub struct Peripherals {
     pub syscfg: UnimplementedPeripheral,
     pub clocks: Clocks,
     pub psm: UnimplementedPeripheral,
-    pub resets: UnimplementedPeripheral,
+    pub resets: Reset,
     pub io_bank0: UnimplementedPeripheral,
     pub io_qspi: UnimplementedPeripheral,
     pub pads_bank0: UnimplementedPeripheral,
@@ -47,7 +51,7 @@ pub struct Peripherals {
     pub watch_dog: UnimplementedPeripheral,
     pub bootram: BootRam, // only allow secure access
     pub rosc: UnimplementedPeripheral,
-    pub trng: UnimplementedPeripheral,
+    pub trng: Trng,
     pub sha256: UnimplementedPeripheral,
     pub powman: UnimplementedPeripheral,
     pub ticks: UnimplementedPeripheral,
@@ -301,18 +305,22 @@ pub trait Peripheral {
 pub struct UnimplementedPeripheral;
 
 impl Peripheral for UnimplementedPeripheral {
-    fn read(&self, _address: u16, _ctx: &PeripheralAccessContext) -> PeripheralResult<u32> {
-        log::warn!("Unimplemented peripheral read");
+    fn read(&self, address: u16, _ctx: &PeripheralAccessContext) -> PeripheralResult<u32> {
+        log::warn!("Unimplemented peripheral read at address {:#X}", address);
         Ok(0)
     }
 
     fn write_raw(
         &mut self,
-        _address: u16,
-        _value: u32,
+        address: u16,
+        value: u32,
         _ctx: &PeripheralAccessContext,
     ) -> PeripheralResult<()> {
-        log::warn!("Unimplemented peripheral write");
+        log::warn!(
+            "Unimplemented peripheral write at address {:#X} with value {:#X}",
+            address,
+            value
+        );
         Ok(())
     }
 }
