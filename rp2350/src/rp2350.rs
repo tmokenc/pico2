@@ -57,19 +57,23 @@ impl Rp2350 {
             wake_opposite_core: false,
         };
 
+        log::trace!("Ticking core 0");
         self.processor[0].tick(&mut ctx);
         let wake_core_1 = ctx.wake_opposite_core;
         ctx.wake_opposite_core = false;
 
+        log::trace!("Ticking core 1");
         self.processor[1].tick(&mut ctx);
         let wake_core_0 = ctx.wake_opposite_core;
 
         // only wake after both cores have ticked
         if wake_core_1 {
+            log::info!("Waking core 1");
             self.processor[1].wake();
         }
 
         if wake_core_0 {
+            log::info!("Waking core 0");
             self.processor[0].wake();
         }
     }
