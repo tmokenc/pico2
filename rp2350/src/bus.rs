@@ -75,7 +75,8 @@ struct Status {
 pub struct Bus {
     pub sram: GenericMemory<{ 520 * KB }>,
     pub rom: GenericMemory<{ 32 * KB }>,
-    pub xip: GenericMemory<{ 64 * MB }>,
+    // pub xip: GenericMemory<{ 64 * KB }>,
+    pub flash: GenericMemory<{ 4 * MB }>,
 
     pub peripherals: Peripherals,
 
@@ -94,7 +95,7 @@ impl Default for Bus {
         let mut res = Self {
             sram: GenericMemory::default(),
             rom: GenericMemory::default(),
-            xip: GenericMemory::default(),
+            flash: GenericMemory::default(),
             peripherals: Peripherals::default(),
             dma_access: None,
             core0_access: None,
@@ -216,7 +217,7 @@ impl Bus {
         let result = match address & 0xF000_0000 {
             Self::ROM => self.rom.read_u32(address),
             Self::SRAM => self.sram.read_u32(address - Self::SRAM),
-            Self::XIP => self.xip.read_u32(address - Self::XIP),
+            Self::XIP => self.flash.read_u32(address - Self::XIP),
             _ => return Err(BusError::BusFault),
         };
 
@@ -352,7 +353,7 @@ impl Bus {
         match address & 0xF000_0000 {
             Self::ROM => Ok(self.rom.read_u32(address)?),
             Self::SRAM => Ok(self.sram.read_u32(address - Self::SRAM)?),
-            Self::XIP => Ok(self.xip.read_u32(address - Self::XIP)?),
+            Self::XIP => Ok(self.flash.read_u32(address - Self::XIP)?),
             _ => {
                 let peri_ctx = PeripheralAccessContext {
                     secure: ctx.secure,
@@ -386,7 +387,7 @@ impl Bus {
         match address & 0xF000_0000 {
             Self::ROM => (),
             Self::SRAM => self.sram.write_u32(address - Self::SRAM, value)?,
-            Self::XIP => self.xip.write_u32(address - Self::XIP, value)?,
+            Self::XIP => self.flash.write_u32(address - Self::XIP, value)?,
             _ => {
                 let peri_ctx = PeripheralAccessContext {
                     secure: ctx.secure,
@@ -408,7 +409,7 @@ impl Bus {
         match address & 0xF000_0000 {
             Self::ROM => Ok(self.rom.read_u16(address)?),
             Self::SRAM => Ok(self.sram.read_u16(address - Self::SRAM)?),
-            Self::XIP => Ok(self.xip.read_u16(address - Self::XIP)?),
+            Self::XIP => Ok(self.flash.read_u16(address - Self::XIP)?),
             _ => {
                 let value = self.read_u32(address & !0b11, ctx)?;
                 if (address & 0b11) == 0 {
@@ -424,7 +425,7 @@ impl Bus {
         match address & 0xF000_0000 {
             Self::ROM => (),
             Self::SRAM => self.sram.write_u16(address - Self::SRAM, value as u16)?,
-            Self::XIP => self.xip.write_u16(address - Self::XIP, value as u16)?,
+            Self::XIP => self.flash.write_u16(address - Self::XIP, value as u16)?,
             _ => {
                 let value = if (address & 0b11) == 0 {
                     value & 0x0000_FFFF
@@ -443,7 +444,7 @@ impl Bus {
         match address & 0xF000_0000 {
             Self::ROM => Ok(self.rom.read_u8(address)?),
             Self::SRAM => Ok(self.sram.read_u8(address - Self::SRAM)?),
-            Self::XIP => Ok(self.xip.read_u8(address - Self::XIP)?),
+            Self::XIP => Ok(self.flash.read_u8(address - Self::XIP)?),
             _ => {
                 let value = self.read_u32(address & !0b11, ctx)?;
                 let index = address as usize & 0b11;
@@ -456,7 +457,7 @@ impl Bus {
         match address & 0xF000_0000 {
             Self::ROM => (),
             Self::SRAM => self.sram.write_u8(address - Self::SRAM, value as u8)?,
-            Self::XIP => self.xip.write_u8(address - Self::XIP, value as u8)?,
+            Self::XIP => self.flash.write_u8(address - Self::XIP, value as u8)?,
             _ => {
                 let value = value & 0xFF;
                 let value = match address & 0b11 {

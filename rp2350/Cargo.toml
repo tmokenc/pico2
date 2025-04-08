@@ -8,3 +8,5 @@ author = "Nguyen Le Duy"
 num-traits = "0.2"
 num-derive = "0.4"
 log = "0.4"
+uf2 = {path = "../uf2"}
+thiserror = "2"
