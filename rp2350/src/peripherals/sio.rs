@@ -1,7 +1,6 @@
 use super::*;
 
 pub mod doorbell;
-pub mod gpio;
 pub mod interpolator;
 pub mod mailboxes;
 pub mod spinlock;
@@ -9,25 +8,44 @@ pub mod timer;
 pub mod tmds;
 
 use doorbell::DoorBell;
-use gpio::Gpio;
 use interpolator::Interpolator;
 use mailboxes::Mailboxes;
 use spinlock::SpinLock;
 use std::cell::RefCell;
 use std::rc::Rc;
 use timer::RiscVPlatformTimer;
+use crate::gpio::GpioController;
 use tmds::TmdsEncoder;
 
 #[derive(Default)]
 pub struct Sio {
-    mailboxes: Rc<RefCell<Mailboxes>>,
+    mailboxes: RefCell<Mailboxes>,
     spinlock: SpinLock,
     doorbell: DoorBell,
     timer: [RiscVPlatformTimer; 2],
-    gpio: Gpio,
-    interpolator: [Interpolator; 4],
+    gpio: Rc<RefCell<GpioController>>,
+    interpolator0: [RefCell<Interpolator<0>>; 2],
+    interpolator1: [RefCell<Interpolator<1>>; 2],
     tmds: [TmdsEncoder; 2],
+    interrupts: Rc<RefCell<Interrupts>>,
 }
+
+impl Sio {
+    pub fn new(gpio: Rc<RefCell<GpioController>>, interrupts: Rc<RefCell<Interrupts>>) -> Self {
+        Self {
+            mailboxes: RefCell::new(Mailboxes::default()),
+            spinlock: SpinLock::default(),
+            doorbell: DoorBell::default(),
+            timer: [RiscVPlatformTimer::default(), RiscVPlatformTimer::default()],
+            interpolator0: [Default::default(), Default::default()],
+            interpolator1: [Default::default(), Default::default()],
+            tmds: [TmdsEncoder::default(), TmdsEncoder::default()],
+            gpio,
+            interrupts,
+        }
+    }
+}
+
 
 pub const CPUID: u16 = 0x000; // Processor core identifier
 pub const GPIO_IN: u16 = 0x004; // Input value for GPIO0..31
@@ -110,6 +128,9 @@ pub const TMDS_POP_DOUBLE_L2: u16 = 0x1E4; // Get lane 2 of the encoding of two 
 
 impl Peripheral for Sio {
     fn read(&self, address: u16, ctx: &PeripheralAccessContext) -> PeripheralResult<u32> {
+        let mut interpolator0 = self.interpolator0[ctx.requestor as usize].borrow_mut();
+        let mut interpolator1 = self.interpolator1[ctx.requestor as usize].borrow_mut();
+
         let value = match address {
             CPUID => match ctx.requestor {
                 Requestor::Proc0 => 0,
@@ -125,6 +146,64 @@ impl Peripheral for Sio {
                 let index = (address - SPINLOCK0) / 4;
                 self.spinlock.claim(index)
             }
+
+
+            INTERPO_ACCUM0 => interpolator0.accum[0],
+            INTERPO_ACCUM1 => interpolator0.accum[1],
+            INTERPO_BASE0 => interpolator0.base[0],
+            INTERPO_BASE1 => interpolator0.base[1],
+            INTERPO_BASE2 => interpolator0.base[2],
+            INTERPO_POP_LANE0 => {
+                let value = interpolator0.result[0];
+                interpolator0.writeback();
+                value
+            }
+            INTERPO_POP_LANE1 => {
+                let value = interpolator0.result[1];
+                interpolator0.writeback();
+                value
+            }
+            INTERPO_POP_FULL => {
+                let value = interpolator0.result[2];
+                interpolator0.writeback();
+                value
+            }
+            INTERPO_PEEK_LANE0 => interpolator0.result[0],
+            INTERPO_PEEK_LANE1 => interpolator0.result[1],
+            INTERPO_PEEK_FULL => interpolator0.result[2],
+            INTERPO_CTRL_LANE0 => interpolator0.ctrl[0],
+            INTERPO_CTRL_LANE1 => interpolator0.ctrl[1],
+            INTERPO_ACCUM0_ADD => interpolator0.sm_result[0],
+            INTERPO_ACCUM1_ADD => interpolator0.sm_result[1],
+            // INTERPO_BASE_1AND0 => 
+            INTERP1_ACCUM0 => interpolator1.accum[0],
+            INTERP1_ACCUM1 => interpolator1.accum[1],
+            INTERP1_BASE0 => interpolator1.base[0],
+            INTERP1_BASE1 => interpolator1.base[1],
+            INTERP1_BASE2 => interpolator1.base[2],
+            INTERP1_POP_LANE0 => {
+                let value = interpolator1.result[0];
+                interpolator1.writeback();
+                value
+            }
+            INTERP1_POP_LANE1 => {
+                let value = interpolator1.result[1];
+                interpolator1.writeback();
+                value
+            }
+            INTERP1_POP_FULL => {
+                let value = interpolator1.result[2];
+                interpolator1.writeback();
+                value
+            }
+            INTERP1_PEEK_LANE0 => interpolator1.result[0],
+            INTERP1_PEEK_LANE1 => interpolator1.result[1],
+            INTERP1_PEEK_FULL => interpolator1.result[2],
+            INTERP1_CTRL_LANE0 => interpolator1.ctrl[0],
+            INTERP1_CTRL_LANE1 => interpolator1.ctrl[1],
+            INTERP1_ACCUM0_ADD => interpolator1.sm_result[0],
+            INTERP1_ACCUM1_ADD => interpolator1.sm_result[1],
+            // INTERP1_BASE_1AND0
 
             GPIO_IN // TODO
             | GPIO_HILIN
@@ -144,38 +223,6 @@ impl Peripheral for Sio {
             | GPIO_HI_OE_CLR
             | GPIO_OE_XOR
             | GPIO_HI_OE_XOR
-            | INTERPO_ACCUM0
-            | INTERPO_ACCUM1
-            | INTERPO_BASE0
-            | INTERPO_BASE1
-            | INTERPO_BASE2
-            | INTERPO_POP_LANE0
-            | INTERPO_POP_LANE1
-            | INTERPO_POP_FULL
-            | INTERPO_PEEK_LANE0
-            | INTERPO_PEEK_LANE1
-            | INTERPO_PEEK_FULL
-            | INTERPO_CTRL_LANE0
-            | INTERPO_CTRL_LANE1
-            | INTERPO_ACCUM0_ADD
-            | INTERPO_ACCUM1_ADD
-            | INTERPO_BASE_1AND0
-            | INTERP1_ACCUM0
-            | INTERP1_ACCUM1
-            | INTERP1_BASE0
-            | INTERP1_BASE1
-            | INTERP1_BASE2
-            | INTERP1_POP_LANE0
-            | INTERP1_POP_LANE1
-            | INTERP1_POP_FULL
-            | INTERP1_PEEK_LANE0
-            | INTERP1_PEEK_LANE1
-            | INTERP1_PEEK_FULL
-            | INTERP1_CTRL_LANE0
-            | INTERP1_CTRL_LANE1
-            | INTERP1_ACCUM0_ADD
-            | INTERP1_ACCUM1_ADD
-            | INTERP1_BASE_1AND0
             | PERI_NONSEC
             | RISCV_SOFTIRQ
             | MTIME_CTRL
@@ -206,6 +253,9 @@ impl Peripheral for Sio {
         value: u32,
         ctx: &PeripheralAccessContext,
     ) -> PeripheralResult<()> {
+        let mut interpolator0 = self.interpolator0[ctx.requestor as usize].borrow_mut();
+        let mut interpolator1 = self.interpolator1[ctx.requestor as usize].borrow_mut();
+
         match address {
             FIFO_ST => {
                 if value & (1 << 2) != 0 {
@@ -222,6 +272,85 @@ impl Peripheral for Sio {
             SPINLOCK0..=SPINLOCK31 => {
                 let index = (address - SPINLOCK0) / 4;
                 self.spinlock.release(index);
+            }
+
+            INTERPO_ACCUM0 => {
+                interpolator0.accum[0] = value;
+                interpolator0.update();
+            }
+            INTERPO_ACCUM1 => {
+                interpolator0.accum[1] = value;
+                interpolator0.update();
+            }
+            INTERPO_BASE0 => {
+                interpolator0.base[0] = value;
+                interpolator0.update();
+            }
+            INTERPO_BASE1 => {
+                interpolator0.base[1] = value;
+                interpolator0.update();
+            }
+            INTERPO_BASE2 => {
+                interpolator0.base[2] = value;
+                interpolator0.update();
+            }
+            INTERPO_CTRL_LANE0 => {
+                interpolator0.ctrl[0] = value;
+                interpolator0.update();
+            }
+            INTERPO_CTRL_LANE1 => {
+                interpolator0.ctrl[1] = value;
+                interpolator0.update();
+            }
+            INTERPO_ACCUM0_ADD => {
+                interpolator0.accum[0] += value;
+                interpolator0.update();
+            }
+            INTERPO_ACCUM1_ADD => {
+                interpolator0.accum[1] += value;
+                interpolator0.update();
+            }
+            INTERPO_BASE_1AND0 => {
+                interpolator0.set_base01(value);
+            }
+            INTERP1_ACCUM0 => {
+                interpolator1.accum[0] = value;
+                interpolator1.update();
+            }
+            INTERP1_ACCUM1 => {
+                interpolator1.accum[1] = value;
+                interpolator1.update();
+            }
+            INTERP1_BASE0 => {
+                interpolator1.base[0] = value;
+                interpolator1.update();
+            }
+            INTERP1_BASE1 => {
+                interpolator1.base[1] = value;
+                interpolator1.update();
+            }
+            INTERP1_BASE2 => {
+                interpolator1.base[2] = value;
+                interpolator1.update();
+            }
+            INTERP1_CTRL_LANE0 => {
+                interpolator1.ctrl[0] = value;
+                interpolator1.update();
+            }
+            INTERP1_CTRL_LANE1 => {
+                interpolator1.ctrl[1] = value;
+                interpolator1.update();
+            }
+            INTERP1_ACCUM0_ADD => {
+                interpolator1.accum[0] += value;
+                interpolator1.update();
+            }
+            INTERP1_ACCUM1_ADD => {
+                interpolator1.accum[1] += value;
+                interpolator1.update();
+            }
+            INTERP1_BASE_1AND0 => {
+                interpolator1.set_base01(value);
             }
 
             GPIO_IN // TODO
@@ -242,38 +371,6 @@ impl Peripheral for Sio {
             | GPIO_HI_OE_CLR
             | GPIO_OE_XOR
             | GPIO_HI_OE_XOR
-            | INTERPO_ACCUM0
-            | INTERPO_ACCUM1
-            | INTERPO_BASE0
-            | INTERPO_BASE1
-            | INTERPO_BASE2
-            | INTERPO_POP_LANE0
-            | INTERPO_POP_LANE1
-            | INTERPO_POP_FULL
-            | INTERPO_PEEK_LANE0
-            | INTERPO_PEEK_LANE1
-            | INTERPO_PEEK_FULL
-            | INTERPO_CTRL_LANE0
-            | INTERPO_CTRL_LANE1
-            | INTERPO_ACCUM0_ADD
-            | INTERPO_ACCUM1_ADD
-            | INTERPO_BASE_1AND0
-            | INTERP1_ACCUM0
-            | INTERP1_ACCUM1
-            | INTERP1_BASE0
-            | INTERP1_BASE1
-            | INTERP1_BASE2
-            | INTERP1_POP_LANE0
-            | INTERP1_POP_LANE1
-            | INTERP1_POP_FULL
-            | INTERP1_PEEK_LANE0
-            | INTERP1_PEEK_LANE1
-            | INTERP1_PEEK_FULL
-            | INTERP1_CTRL_LANE0
-            | INTERP1_CTRL_LANE1
-            | INTERP1_ACCUM0_ADD
-            | INTERP1_ACCUM1_ADD
-            | INTERP1_BASE_1AND0
             | PERI_NONSEC
             | RISCV_SOFTIRQ
             | MTIME_CTRL
@@ -292,7 +389,20 @@ impl Peripheral for Sio {
             | TMDS_PEEK_DOUBLE_L2
             | TMDS_POP_DOUBLE_L2 => {}, // TODO
                                        
-            CPUID | SPINLOCK_ST => { /* read-only */ }
+            CPUID 
+            | SPINLOCK_ST 
+            | INTERPO_POP_LANE0
+            | INTERPO_POP_LANE1
+            | INTERPO_POP_FULL
+            | INTERPO_PEEK_LANE0
+            | INTERPO_PEEK_LANE1
+            | INTERPO_PEEK_FULL
+            | INTERP1_POP_LANE0
+            | INTERP1_POP_LANE1
+            | INTERP1_POP_FULL
+            | INTERP1_PEEK_LANE0
+            | INTERP1_PEEK_LANE1
+            | INTERP1_PEEK_FULL => { /* read-only */ }
             _ => return Err(PeripheralError::OutOfBounds),
         }
 
