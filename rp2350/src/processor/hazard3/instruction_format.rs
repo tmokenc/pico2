@@ -144,9 +144,9 @@ pub fn crs1_(inst: u16) -> Register {
 
 #[inline]
 pub fn imm_ci(inst: u16) -> u32 {
-    (extract_bits(inst as u32, 2..=5) as u32)
-        .overflowing_sub((extract_bit(inst as u32, 12) as u32) << 5)
-        .0
+    let raw: u16 = (extract_bit(inst, 12) << 5) | extract_bits(inst, 2..=6);
+
+    sign_extend(raw as u32, 5)
 }
 
 #[inline]
@@ -451,7 +451,7 @@ mod test {
     #[test]
     fn test_imm_cj() {
         let inst = 0b1111111111111111;
-        assert_eq!(imm_cj(inst), -1i32 as u32);
+        assert_eq!(imm_cj(inst), -2i32 as u32);
     }
 
     #[test]
@@ -463,6 +463,6 @@ mod test {
     #[test]
     fn test_imm_cb() {
         let inst = 0b1111111111111111;
-        assert_eq!(imm_cb(inst), -1i32 as u32);
+        assert_eq!(imm_cb(inst), -2i32 as u32);
     }
 }

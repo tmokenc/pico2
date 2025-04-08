@@ -1836,7 +1836,7 @@ mod tests {
 
     instruction_test!(jalr, 0b11011100110000000000110001100111, ctx, {
         assert_eq!(ctx.register_write, Some((24, PC + 4)));
-        assert_eq!(ctx.next_pc, ((PC as i32) + (-564i32 & !1)) as u32);
+        assert_eq!(ctx.next_pc, (-564i32 & !1) as u32);
     });
 
     branch_test!(beq, 0b00000000000000000000000001100011, [
