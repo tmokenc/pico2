@@ -1,3 +1,5 @@
+use crate::utils::extract_bits;
+
 /// All CSRs are 32-bit, and MXLEN is fixed at 32 bits. CSR addresses not listed in this section are unimplemented.
 /// Accessing an unimplemented CSR raises an illegal instruction exception (mcause = 2). This includes all S-mode CSRs.
 use super::trap::{Exception, Trap};
@@ -76,6 +78,7 @@ pub(super) struct Csrs {
     msleep: u32,
     dmdata0: u32,
 
+    pending_write: Option<(u16, u32)>, // write happend only at the end of a step in Hazard3
     pub(super) core_id: u8,
     pub(super) privilege_mode: PrivilegeMode,
 }
@@ -113,6 +116,7 @@ impl Default for Csrs {
             core_id: 0,
             msleep: 0,
             privilege_mode: PrivilegeMode::Machine,
+            pending_write: None,
         }
     }
 }
@@ -264,7 +268,17 @@ impl Csrs {
     }
 
     pub fn tick(&mut self) {
-        // TODO
+        if self.mcountinhibit & 1 == 0 {
+            self.mcycles = self.mcycles.wrapping_add(1);
+        }
+
+        if self.mcountinhibit & 0b100 == 0 {
+            self.minstret = self.minstret.wrapping_add(1);
+        }
+
+        if let Some((addr, data)) = self.pending_write.take() {
+            self._write(addr, data);
+        }
     }
 
     pub fn set_trap(&mut self, trap: Trap) {
@@ -289,6 +303,8 @@ impl Csrs {
         }
     }
     pub fn read(&self, offset: u16) -> Result<u32, Exception> {
+        log::info!("read csr: {:#x}", offset);
+
         let result = match offset {
             Self::MVENDORID => Self::VENDORID,
             Self::MARCHID => Self::ARCHID,
@@ -398,7 +414,81 @@ impl Csrs {
         Ok(result)
     }
 
+    fn has_permission(&self, csr: u16) -> bool {
+        (csr < 1 << 12) && (extract_bits(csr, 8..=9) <= (self.privilege_mode() as u16))
+    }
+
     pub(super) fn write(&mut self, csr: u16, value: u32) -> Result<(), Exception> {
+        if !self.has_permission(csr) {
+            return Err(Exception::IllegalInstruction);
+        }
+
+        self.pending_write = Some((csr, value));
+
+        // Validate CSR address
+        let is_valid = matches!(csr,
+            Self::MSTATUS
+            | Self::MEDELEG
+            | Self::MIDELEG
+            | Self::MIE
+            | Self::MTVEC
+            | Self::MCOUNTEREN
+            | Self::MCOUNTINHIBIT
+            | Self::MSCRATCH
+            | Self::MEPC
+            | Self::MCAUSE
+            | Self::MIP
+            | Self::PMPCFG0
+            | Self::PMPCFG1
+            | Self::PMPADDR0..=Self::PMPADDR7
+            | Self::TSELECT
+            | Self::TDATA1
+            | Self::TDATA2
+            | Self::DCSR
+            | Self::DPC
+            | Self::MCYCLE
+            | Self::MINSTRET
+            | Self::MCYCLEH
+            | Self::MINSTRETH
+            | Self::PMPCFGM0
+            | Self::MEIEA
+            | Self::MEIPA
+            | Self::MEIFA
+            | Self::MEIPRA
+            | Self::MEINEXT
+            | Self::MEICONTEXT
+            | Self::MSLEEP
+            | Self::DMDATA0
+            | Self::MISA
+            | Self::MENVCFG
+            | Self::MENVCFGH
+            | Self::MSTATUSH
+            | Self::MHPMEVENT3..=Self::MHPMEVENT31
+            | Self::MTVAL
+            | Self::PMPCFG2 | Self::PMPCFG3
+            | Self::PMPADDR8..=Self::PMPADDR15
+            | Self::MHPMCOUNTER3..=Self::MHPMCOUNTER31
+            | Self::MHPMCOUNTER3H..=Self::MHPMCOUNTER31H
+            | Self::CYCLE
+            | Self::INSTRET
+            | Self::CYCLEH
+            | Self::INSTRETH
+            | Self::MVENDORID
+            | Self::MARCHID
+            | Self::MIMPID
+            | Self::MHARTID
+            | Self::MCONFIGPTR
+        );
+
+        if !is_valid {
+            return Err(Exception::IllegalInstruction);
+        }
+
+        Ok(())
+    }
+
+    // The actual write happens here
+    fn _write(&mut self, csr: u16, value: u32) {
         match csr {
             Self::MSTATUS => {
                 let privilege = PrivilegeMode::from((value >> 11) & 0b11);
@@ -420,7 +510,7 @@ impl Csrs {
             Self::PMPCFG1 => self.pmpcfg[1] = value,
             Self::PMPADDR0..=Self::PMPADDR7 => {
                 let idx = (csr - Self::PMPADDR0) as usize;
-                self.pmpaddr[idx] = value;
+                self.pmpaddr[idx] = value & 0x3fffffff;
             }
             Self::TSELECT => self.tselect = value as u8,
             Self::TDATA1 => {
@@ -437,20 +527,11 @@ impl Csrs {
             }
             Self::TDATA2 => self.tdata[1] = value,
             Self::DCSR => {
-                if !self.is_in_debug_mode() {
-                    return Err(Exception::IllegalInstruction);
-                }
-
                 let value = value & 0b0000_1111_1111_1111_1111_0000_0000_0111;
                 // 31:28 is hardwired to 4
                 self.dcsr = value | 4 << 28;
             }
-            Self::DPC =>{
-                if !self.is_in_debug_mode() {
-                    return Err(Exception::IllegalInstruction);
-            }
-                self.dpc = value;
-                           }
+            Self::DPC => self.dpc = value,
             Self::MCYCLE => {
                 self.mcycles &= 0xFFFF_FFFF_0000_0000; // clear lower 32 bits
                 self.mcycles |= value as u64; // set lower 32 bits
@@ -468,10 +549,24 @@ impl Csrs {
                 self.minstret |= (value as u64) << 32; // set upper 32 bits
             }
             Self::PMPCFGM0 => self.pmpcfgm0 = value,
-            Self::MEIEA => self.meiea = value,
-            Self::MEIPA => self.meipa = value,
-            Self::MEIFA => self.meifa = value,
-            Self::MEIPRA => self.meipra = value,
+
+            // ------ Interrupt handler CSRs ----------
+            Self::MEIEA => {
+                // TODO
+                self.meiea = value;
+            }
+            Self::MEIPA => {
+                // TODO
+                self.meipa = value;
+            }
+            Self::MEIFA => {
+                // TODO
+                self.meifa = value;
+            }
+            Self::MEIPRA => {
+                // TODO
+                self.meipra = value;
+            }
             Self::MEINEXT => {
                 if value & 1 != 0 {
                     // TODO
@@ -497,13 +592,10 @@ impl Csrs {
                 self.meicontext |= updated_value;
             }
 
+            // -- End of Interrupt handler CSRs -- 
+
             Self::MSLEEP => self.msleep = value,
-            Self::DMDATA0 => {
-                if !self.is_in_debug_mode() {
-                    return Err(Exception::IllegalInstruction);
-                }
-                self.dmdata0 = value;
-            }
+            Self::DMDATA0 => self.dmdata0 = value,
 
             Self::MISA
             | Self::MENVCFG
@@ -525,9 +617,7 @@ impl Csrs {
             | Self::MHARTID
             | Self::MCONFIGPTR => { /* Read-only */ }
             // Unimplemented CSR
-            _ => return Err(Exception::IllegalInstruction),
+            _ => unreachable!(),
         }
-
-        Ok(())
     }
 }
