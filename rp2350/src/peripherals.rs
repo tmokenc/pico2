@@ -7,12 +7,14 @@ use std::rc::Rc;
 pub mod bootram;
 pub mod busctrl;
 pub mod clocks;
+pub mod dma;
 pub mod sio;
 pub mod uart;
 
 pub use bootram::BootRam;
 pub use busctrl::BusCtrl;
 pub use clocks::Clocks;
+pub use dma::Dma;
 pub use sio::Sio;
 pub use uart::Uart;
 
