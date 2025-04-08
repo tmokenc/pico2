@@ -1,6 +1,8 @@
 use std::ops::Deref;
+use thiserror::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error("Memory access out of bounds")]
 pub struct MemoryOutOfBoundsError;
 
 type MemoryResult<T> = Result<T, MemoryOutOfBoundsError>;
@@ -30,6 +32,18 @@ impl<const N: usize> GenericMemory<N> {
         Self {
             data: data.to_vec(),
         }
+    }
+
+    pub fn write_slice(&mut self, address: u32, data: &[u8]) -> MemoryResult<()> {
+        let address = address as usize;
+        // Check if the address is out of bounds
+        if address + data.len() > N {
+            return Err(MemoryOutOfBoundsError);
+        }
+
+        self.data[address..(address + data.len())].copy_from_slice(data);
+
+        Ok(())
     }
 
     pub fn read_u32(&self, address: u32) -> MemoryResult<u32> {
