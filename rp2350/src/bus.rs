@@ -384,7 +384,7 @@ impl Bus {
         }
 
         match address & 0xF000_0000 {
-            Self::ROM => self.rom.write_u32(address, value)?,
+            Self::ROM => (),
             Self::SRAM => self.sram.write_u32(address - Self::SRAM, value)?,
             Self::XIP => self.xip.write_u32(address - Self::XIP, value)?,
             _ => {
