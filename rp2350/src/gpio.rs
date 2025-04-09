@@ -179,34 +179,29 @@ impl Override {
 
 #[derive(Debug, Default, Clone)]
 pub struct GpioPinValue {
-    value: Rc<RefCell<f32>>,
-    // value: Rc<RefCell<f32>>,
+    value: f32,
 }
 
 impl From<bool> for GpioPinValue {
     fn from(value: bool) -> Self {
         let value = if value { 3.3 } else { 0.0 };
-        GpioPinValue {
-            value: Rc::new(RefCell::new(value)),
-        }
+        GpioPinValue { value }
     }
 }
 
 impl From<f32> for GpioPinValue {
     fn from(value: f32) -> Self {
-        GpioPinValue {
-            value: Rc::new(RefCell::new(value)),
-        }
+        GpioPinValue { value }
     }
 }
 
 impl GpioPinValue {
     pub fn set_value(&mut self, value: f32) {
-        *self.value.borrow_mut() = value;
+        self.value = value;
     }
 
     pub fn get_value(&self) -> f32 {
-        *self.value.borrow()
+        self.value
     }
 
     pub fn set_high(&mut self) {

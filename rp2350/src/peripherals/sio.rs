@@ -28,6 +28,9 @@ pub struct Sio {
     interpolator1: [RefCell<Interpolator<1>>; 2],
     tmds: [TmdsEncoder; 2],
     interrupts: Rc<RefCell<Interrupts>>,
+
+    gpio_value: u32,
+    gpio_output_enable: u32
 }
 
 impl Sio {
@@ -40,8 +43,27 @@ impl Sio {
             interpolator0: [Default::default(), Default::default()],
             interpolator1: [Default::default(), Default::default()],
             tmds: [TmdsEncoder::default(), TmdsEncoder::default()],
+            gpio_value: 0,
+            gpio_output_enable: 0,
             gpio,
             interrupts,
+        }
+    }
+
+    fn update_gpio(&self, old_gpio_value: u32, old_gpio_output_enable: u32) {
+        let gpio = self.gpio.as_ref().borrow();
+
+        let updated_pins = (self.gpio_value ^ old_gpio_value)
+            | (self.gpio_output_enable ^ old_gpio_output_enable);
+
+        if updated_pins == 0 {
+            return
+        }
+
+        for (i, pin) in gpio.pins.iter().enumerate() {
+            if (updated_pins & (1 << i)) != 0 {
+                // TODO
+            }
         }
     }
 }
@@ -136,7 +158,21 @@ impl Peripheral for Sio {
                 Requestor::Proc0 => 0,
                 Requestor::Proc1 => 1,
                 _ => return Err(PeripheralError::OutOfBounds),
-            },
+            }
+
+            GPIO_IN => {
+                let gpio = self.gpio.as_ref().borrow();
+                gpio.pins
+                    .iter()
+                    .map(|pin| pin.value.is_high() as u32)
+                    .rev()
+                    .fold(0, |acc, value| (acc << 1) | value)
+            }
+            GPIO_HILIN => 0, // TODO QSPI USB GPIO32..47
+            GPIO_OUT => self.gpio_value,
+            GPIO_HILOUT => 0, // TODO QSPI USB GPIO32..47
+            GPIO_OE => self.gpio_output_enable,
+            GPIO_HI_OE => 0, // TODO QSPI USB GPIO32..47
 
             FIFO_ST => self.mailboxes.borrow_mut().state(ctx.requestor),
             FIFO_RD => self.mailboxes.borrow_mut().read(ctx.requestor),
@@ -146,7 +182,6 @@ impl Peripheral for Sio {
                 let index = (address - SPINLOCK0) / 4;
                 self.spinlock.claim(index)
             }
-
 
             INTERPO_ACCUM0 => interpolator0.accum[0],
             INTERPO_ACCUM1 => interpolator0.accum[1],
@@ -205,25 +240,7 @@ impl Peripheral for Sio {
             INTERP1_ACCUM1_ADD => interpolator1.sm_result[1],
             // INTERP1_BASE_1AND0
 
-            GPIO_IN // TODO
-            | GPIO_HILIN
-            | GPIO_OUT
-            | GPIO_HILOUT
-            | GPIO_OUT_SET
-            | GPIO_HILOUT_SET
-            | GPIO_OUT_CLR
-            | GPIO_HILOUT_CLR
-            | GPIO_OUT_XOR
-            | GPIO_HLOUT_XOR
-            | GPIO_OE
-            | GPIO_HI_OE
-            | GPIO_OE_SET
-            | GPIO_HI_OE_SET
-            | GPIO_OE_CLR
-            | GPIO_HI_OE_CLR
-            | GPIO_OE_XOR
-            | GPIO_HI_OE_XOR
-            | PERI_NONSEC
+            | PERI_NONSEC  // TODO
             | RISCV_SOFTIRQ
             | MTIME_CTRL
             | MTIME
@@ -241,6 +258,18 @@ impl Peripheral for Sio {
             | TMDS_PEEK_DOUBLE_L2
             | TMDS_POP_DOUBLE_L2 => 0, // TODO
 
+            GPIO_OUT_SET  // Write only
+            | GPIO_OUT_CLR
+            | GPIO_HILOUT_CLR
+            | GPIO_OUT_XOR
+            | GPIO_HLOUT_XOR
+            | GPIO_OE_SET
+            | GPIO_HI_OE_SET
+            | GPIO_OE_CLR
+            | GPIO_HI_OE_CLR
+            | GPIO_OE_XOR
+            | GPIO_HI_OE_XOR
+            | GPIO_HILOUT_SET => 0,
             _ => return Err(PeripheralError::OutOfBounds),
         };
 
@@ -256,7 +285,59 @@ impl Peripheral for Sio {
         let mut interpolator0 = self.interpolator0[ctx.requestor as usize].borrow_mut();
         let mut interpolator1 = self.interpolator1[ctx.requestor as usize].borrow_mut();
 
+        let old_gpio_value = self.gpio_value;
+        let old_gpio_output_enable = self.gpio_output_enable;
+        let mut gpio_updated = false;
+
         match address {
+            GPIO_OUT => {
+                self.gpio_value = value;
+            }
+            GPIO_HILOUT => {
+                // TODO QSPI USB GPIO32..47
+            }
+            GPIO_OUT_SET => {
+                self.gpio_value |= value;
+            }
+            GPIO_HILOUT_SET => {
+                // TODO QSPI USB GPIO32..47
+            }
+            GPIO_OUT_CLR => {
+                self.gpio_value &= !value;
+            }
+            GPIO_HILOUT_CLR => {
+                // TODO QSPI USB GPIO32..47
+            }
+            GPIO_OUT_XOR => {
+                self.gpio_value ^= value;
+            }
+            GPIO_HLOUT_XOR => {
+                // TODO QSPI USB GPIO32..47
+            }
+            GPIO_OE => {
+                self.gpio_output_enable = value;
+            }
+            GPIO_HI_OE => {
+                // TODO QSPI USB GPIO32..47
+            }
+            GPIO_OE_SET => {
+                self.gpio_output_enable |= value;
+            }
+            GPIO_HI_OE_SET => {
+                // TODO QSPI USB GPIO32..47
+            }
+            GPIO_OE_CLR => {
+                self.gpio_output_enable &= !value;
+            }
+            GPIO_HI_OE_CLR => {
+                // TODO QSPI USB GPIO32..47
+            }
+            GPIO_OE_XOR => {
+                self.gpio_output_enable ^= value;
+            }
+            GPIO_HI_OE_XOR => {
+                // TODO QSPI USB GPIO32..47
+            }
             FIFO_ST => {
                 if value & (1 << 2) != 0 {
                     self.mailboxes.borrow_mut().clear_wof(ctx.requestor);
@@ -353,25 +434,7 @@ impl Peripheral for Sio {
                 interpolator1.set_base01(value);
             }
 
-            GPIO_IN // TODO
-            | GPIO_HILIN
-            | GPIO_OUT
-            | GPIO_HILOUT
-            | GPIO_OUT_SET
-            | GPIO_HILOUT_SET
-            | GPIO_OUT_CLR
-            | GPIO_HILOUT_CLR
-            | GPIO_OUT_XOR
-            | GPIO_HLOUT_XOR
-            | GPIO_OE
-            | GPIO_HI_OE
-            | GPIO_OE_SET
-            | GPIO_HI_OE_SET
-            | GPIO_OE_CLR
-            | GPIO_HI_OE_CLR
-            | GPIO_OE_XOR
-            | GPIO_HI_OE_XOR
-            | PERI_NONSEC
+            PERI_NONSEC // TODO
             | RISCV_SOFTIRQ
             | MTIME_CTRL
             | MTIME
@@ -389,7 +452,9 @@ impl Peripheral for Sio {
             | TMDS_PEEK_DOUBLE_L2
             | TMDS_POP_DOUBLE_L2 => {}, // TODO
                                        
-            CPUID 
+            CPUID // TODO
+            | GPIO_IN
+            | GPIO_HILIN
             | SPINLOCK_ST 
             | INTERPO_POP_LANE0
             | INTERPO_POP_LANE1
@@ -406,6 +471,9 @@ impl Peripheral for Sio {
             _ => return Err(PeripheralError::OutOfBounds),
         }
 
+        self.update_gpio(old_gpio_value, old_gpio_output_enable);
+
         Ok(())
     }
+
 }
