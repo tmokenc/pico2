@@ -10,3 +10,5 @@ num-derive = "0.4"
 log = "0.4"
 uf2 = {path = "../uf2"}
 thiserror = "2"
+getrandom = {version = "0.3", features = ["wasm_js"] }
+sha2 = "0.10"
