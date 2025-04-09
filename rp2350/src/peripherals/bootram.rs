@@ -1,7 +1,6 @@
 use super::*;
 use crate::memory::GenericMemory;
 use std::cell::RefCell;
-use std::ops::Deref;
 
 pub struct BootRam {
     pub data: GenericMemory<{ 256 * 4 }>,
