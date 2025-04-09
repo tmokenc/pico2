@@ -145,7 +145,6 @@ impl ExecContext<'_> {
         csr: impl AsPrimitive<u16>,
         value: impl AsPrimitive<u32>,
     ) -> Result<(), Exception> {
-        // TODO write error
         self.core.csrs.write(csr.as_(), value.as_())
     }
 
@@ -432,6 +431,7 @@ fn exec_system_instruction(code: u32, ctx: &mut ExecContext) {
         }
         _ => {
             let IType { rd, rs1, imm } = code.into();
+            let imm = imm & 0xfff; // unsigned
 
             macro_rules! read_csr {
                 ($csr:expr) => {
@@ -1519,6 +1519,7 @@ pub(super) fn exec_instruction(code: u32, ctx: &mut ExecContext<'_>) {
 mod tests {
     use super::*;
     use crate::bus::Bus;
+    use crate::clock::Clock;
     use crate::gpio::GpioController;
     use crate::processor::*;
     use std::cell::RefCell;
@@ -1530,10 +1531,11 @@ mod tests {
         ($core:ident, $bus:ident) => {
             let interrupts = Rc::new(RefCell::new(Interrupts::default()));
             let gpio = Rc::new(RefCell::new(GpioController::default()));
+            let clock = Rc::new(RefCell::new(Clock::default()));
 
             let mut $core = Hazard3::new(Rc::clone(&interrupts));
             $core.set_pc(PC);
-            let mut $bus = Bus::new(gpio, interrupts);
+            let mut $bus = Bus::new(gpio, interrupts, clock);
         };
     }
 

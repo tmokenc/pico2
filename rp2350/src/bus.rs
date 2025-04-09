@@ -1,3 +1,4 @@
+use crate::clock::Clock;
 use crate::common::*;
 use crate::gpio::GpioController;
 use crate::interrupts::Interrupts;
@@ -120,9 +121,13 @@ impl Bus {
     pub const SIO: u32 = 0xd000_0000;
     pub const CORTEX_M33_PRIVATE_REGISTERS: u32 = 0xe0000000;
 
-    pub fn new(gpio: Rc<RefCell<GpioController>>, interrupts: Rc<RefCell<Interrupts>>) -> Self {
+    pub fn new(
+        gpio: Rc<RefCell<GpioController>>,
+        interrupts: Rc<RefCell<Interrupts>>,
+        clock: Rc<RefCell<Clock>>,
+    ) -> Self {
         Self {
-            peripherals: Peripherals::new(gpio, interrupts),
+            peripherals: Peripherals::new(gpio, interrupts, clock),
             ..Default::default()
         }
     }
@@ -485,6 +490,7 @@ mod tests {
             let mut $bus = Bus::new(
                 Rc::new(RefCell::new(GpioController::default())),
                 Rc::new(RefCell::new(Interrupts::default())),
+                Rc::new(RefCell::new(Clock::new(150_000_000))),
             );
         };
     }
