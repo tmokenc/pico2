@@ -1,6 +1,6 @@
 use crate::bus::Bus;
 use crate::clock::Clock;
-use crate::common::*;
+use crate::common::MHZ;
 use crate::gpio::GpioController;
 use crate::interrupts::Interrupts;
 use crate::processor::{ProcessorContext, Rp2350Core};
@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 pub struct Rp2350 {
-    pub clock: Clock<{ 150 * MHZ }>,
+    pub clock: Rc<RefCell<Clock>>,
     pub bus: Bus,
     pub processor: [Rp2350Core; 2],
     pub gpio: Rc<RefCell<GpioController>>,
@@ -25,6 +25,7 @@ impl Rp2350 {
     pub fn new() -> Self {
         let gpio = Rc::new(RefCell::new(GpioController::default()));
         let interrupts = Rc::new(RefCell::new(Interrupts::default()));
+        let clock = Rc::new(RefCell::new(Clock::new(150 * MHZ)));
 
         let mut processor = [
             Rp2350Core::new(Rc::clone(&interrupts)),
@@ -37,9 +38,9 @@ impl Rp2350 {
         processor[1].sleep();
 
         Self {
+            bus: Bus::new(Rc::clone(&gpio), Rc::clone(&interrupts), Rc::clone(&clock)),
             processor,
-            clock: Clock::default(),
-            bus: Bus::new(Rc::clone(&gpio), Rc::clone(&interrupts)),
+            clock,
             interrupts,
             gpio,
         }

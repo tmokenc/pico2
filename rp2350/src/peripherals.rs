@@ -1,3 +1,4 @@
+use crate::clock::Clock;
 use crate::common::*;
 use crate::gpio::GpioController;
 use crate::interrupts::Interrupts;
@@ -9,6 +10,7 @@ pub mod busctrl;
 pub mod clocks;
 pub mod dma;
 pub mod reset;
+pub mod sha256;
 pub mod sio;
 pub mod trng;
 pub mod uart;
@@ -18,6 +20,7 @@ pub use busctrl::BusCtrl;
 pub use clocks::Clocks;
 pub use dma::Dma;
 pub use reset::Reset;
+pub use sha256::Sha256;
 pub use sio::Sio;
 pub use trng::Trng;
 pub use uart::Uart;
@@ -52,7 +55,7 @@ pub struct Peripherals {
     pub bootram: BootRam, // only allow secure access
     pub rosc: UnimplementedPeripheral,
     pub trng: Trng,
-    pub sha256: UnimplementedPeripheral,
+    pub sha256: Rc<RefCell<Sha256>>,
     pub powman: UnimplementedPeripheral,
     pub ticks: UnimplementedPeripheral,
     pub otp: UnimplementedPeripheral,
@@ -72,7 +75,7 @@ pub struct Peripherals {
     pub tbman: UnimplementedPeripheral,
 
     // AHB peripherals
-    pub dma: UnimplementedPeripheral,
+    pub dma: Dma,
     pub usbctrl: UnimplementedPeripheral,
     pub usbctrl_dpram: UnimplementedPeripheral,
     pub usbctrl_regs: UnimplementedPeripheral,
@@ -86,8 +89,15 @@ pub struct Peripherals {
 }
 
 impl Peripherals {
-    pub fn new(gpio: Rc<RefCell<GpioController>>, interrupts: Rc<RefCell<Interrupts>>) -> Self {
+    pub fn new(
+        gpio: Rc<RefCell<GpioController>>,
+        interrupts: Rc<RefCell<Interrupts>>,
+        clock: Rc<RefCell<Clock>>,
+    ) -> Self {
         Self {
+            sio: Sio::new(Rc::clone(&gpio), Rc::clone(&interrupts)),
+            sha256: Rc::new(RefCell::new(Sha256::new(Rc::clone(&clock)))),
+            dma: Dma::new(Rc::clone(&interrupts), Rc::clone(&clock)),
             ..Default::default()
         }
     }
