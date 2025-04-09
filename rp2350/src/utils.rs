@@ -34,3 +34,20 @@ pub const fn sign_extend(bits: u32, sign_bit: u32) -> u32 {
         .overflowing_sub((bits & 1 << sign_bit) << 1)
         .0
 }
+
+/// Set a state of a bit (on or off) in a u32 variable.
+pub fn set_bit_state(bits: &mut u32, bit: u32, state: bool) {
+    if state {
+        set_bit(bits, bit);
+    } else {
+        clear_bit(bits, bit);
+    }
+}
+
+pub fn set_bit(bits: &mut u32, bit: u32) {
+    *bits |= 1 << bit;
+}
+
+pub fn clear_bit(bits: &mut u32, bit: u32) {
+    *bits &= !(1 << bit);
+}

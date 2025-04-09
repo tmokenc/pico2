@@ -205,6 +205,7 @@ impl<const N: usize> Interpolator<N> {
         self.ctrl[0] = ctrl0.to_u32();
         self.ctrl[1] = ctrl1.to_u32();
     }
+
     pub fn writeback(&mut self) {
         let ctrl0 = InterpolatorConfig::new(self.ctrl[0]);
         let ctrl1 = InterpolatorConfig::new(self.ctrl[1]);
