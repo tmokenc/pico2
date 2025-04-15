@@ -1,6 +1,5 @@
 use super::Rp2350;
 use crate::common::*;
-use crate::memory::GenericMemory;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, Error)]
@@ -22,7 +21,7 @@ pub enum SimulatorError {
 #[derive(Default)]
 pub struct Pico2 {
     pub mcu: Rp2350,
-    pub flash: GenericMemory<{ 4 * MB }>,
+    pub is_flashed: bool,
 }
 
 impl Pico2 {
@@ -33,7 +32,7 @@ impl Pico2 {
 
         Self {
             mcu: Rp2350::new(),
-            flash: GenericMemory::new(flash),
+            is_flashed: false,
         }
     }
 
@@ -42,10 +41,11 @@ impl Pico2 {
             return Err(SimulatorError::FileTooLarge);
         }
 
-        self.mcu.bus.flash.write_slice(Self::FLASH_ADDRESS, bin)?;
+        self.mcu.bus.flash.write_slice(0, bin)?;
 
         // Reset the MCU to start executing the new program
-        self.reset();
+        // self.reset();
+        self.is_flashed = true;
 
         Ok(())
     }
@@ -57,11 +57,18 @@ impl Pico2 {
 
         for block in uf2::read_uf2(uf2)? {
             let offset = block.target_addr - Self::FLASH_ADDRESS;
+            let offset = offset & 0x1FFF_FFFF;
+            log::debug!(
+                "Writing block to flash: {:#X} -> {:#X}",
+                block.target_addr,
+                offset
+            );
             self.mcu.bus.flash.write_slice(offset, &block.data)?;
         }
 
         // Reset the MCU to start executing the new program
-        self.reset();
+        // self.reset();
+        self.is_flashed = true;
 
         Ok(())
     }

@@ -2,8 +2,11 @@ mod boot_ram;
 mod boot_rom;
 mod editor;
 mod field;
+mod flash;
 mod processor_core;
+mod sha256;
 mod sram;
+mod watchdog;
 
 use crate::simulator::TaskCommand;
 use egui::collapsing_header::CollapsingState;
@@ -21,10 +24,38 @@ use rp2350::Rp2350;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
-use std::sync::atomic::AtomicBool;
 
 pub trait Rp2350Component: Default + serde::Serialize + serde::de::DeserializeOwned {
+    const NAME: &'static str;
+
     fn ui(&mut self, ui: &mut Ui, rp2350: &mut Rp2350);
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Window {
+    // Base
+    Editor,
+    Field,
+
+    // Processor Cores
+    Core0,
+    Core1,
+
+    // Memories
+    BootRom,
+    Sram,
+    BootRam,
+    Xip,
+    Flash,
+
+    // Peripherals
+    WatchDog,
+    Sha256,
+    Spi,
+    Uart,
+    I2c,
+    Pwm,
+    Dma,
 }
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
@@ -46,6 +77,11 @@ pub struct App {
     sram: sram::Sram,
     boot_ram: boot_ram::BootRam,
     field: field::Field,
+    flash: flash::Flash,
+
+    // peripherals
+    watchdog: watchdog::WatchDog,
+    sha256: sha256::Sha256,
 }
 
 impl TabViewer for App {
@@ -60,7 +96,15 @@ impl TabViewer for App {
             Window::BootRom => "Boot ROM",
             Window::Sram => "SRAM",
             Window::BootRam => "Boot RAM",
+            Window::Flash => "Flash",
             Window::Xip => "XIP",
+            Window::WatchDog => "Watch Dog",
+            Window::Sha256 => "SHA-256",
+            Window::Spi => "SPI",
+            Window::Uart => "UART",
+            Window::I2c => "I2C",
+            Window::Pwm => "PWM",
+            Window::Dma => "DMA",
         };
 
         title.into()
@@ -100,30 +144,36 @@ impl TabViewer for App {
                     Window::BootRom => self.boot_rom.ui(ui, rp2350),
                     Window::Sram => self.sram.ui(ui, rp2350),
                     Window::BootRam => self.boot_ram.ui(ui, rp2350),
+                    Window::Flash => self.flash.ui(ui, rp2350),
                     Window::Xip => {
-                        ui.label("XIP");
+                        ui.heading("XIP");
+                        ui.label("todo");
+                    }
+                    Window::WatchDog => self.watchdog.ui(ui, rp2350),
+                    Window::Sha256 => self.sha256.ui(ui, rp2350),
+                    Window::Spi => {
+                        ui.heading("SPI");
+                        ui.label("todo");
+                    }
+                    Window::Uart => {
+                        ui.heading("UART");
+                        ui.label("todo");
+                    }
+                    Window::I2c => {
+                        ui.heading("I2C");
+                        ui.label("todo");
+                    }
+                    Window::Pwm => {
+                        ui.heading("PWM");
+                        ui.label("todo");
+                    }
+                    Window::Dma => {
+                        ui.heading("DMA");
+                        ui.label("todo");
                     }
                 }
             });
     }
-}
-
-#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Window {
-    // Base
-    Editor,
-    Field,
-
-    // Processor Cores
-    Core0,
-    Core1,
-
-    // Memories
-    BootRom,
-    Sram,
-    BootRam,
-    Xip,
-    // Peripherals
 }
 
 impl Window {
@@ -137,6 +187,14 @@ impl Window {
             Window::Sram => "SRAM",
             Window::BootRam => "Boot RAM",
             Window::Xip => "XIP",
+            Window::Flash => "Flash",
+            Window::WatchDog => "Watch Dog",
+            Window::Sha256 => "SHA-256",
+            Window::Spi => "SPI",
+            Window::Uart => "UART",
+            Window::I2c => "I2C",
+            Window::Pwm => "PWM",
+            Window::Dma => "DMA",
         }
     }
 }
@@ -193,21 +251,19 @@ impl SimulatorApp {
         };
 
         let pico2 = Rc::clone(&app.app.pico2);
-        let sender = crate::simulator::run_pico2_sim(pico2);
+        let sender = crate::simulator::run_pico2_sim(cc.egui_ctx.clone(), pico2);
         app.app.send_task = Some(sender);
 
         return app;
     }
 
     fn step(&mut self) {
-        // TODO
         if let Some(ref mut send_task) = self.app.send_task {
             let _ = send_task.try_send(TaskCommand::Step);
         }
     }
 
     fn run(&mut self) {
-        // TODO
         if let Some(ref mut send_task) = self.app.send_task {
             let _ = send_task.try_send(TaskCommand::Run);
         }
@@ -216,7 +272,6 @@ impl SimulatorApp {
     }
 
     fn pause(&mut self) {
-        // TODO
         if let Some(ref mut send_task) = self.app.send_task {
             let _ = send_task.try_send(TaskCommand::Pause);
         }
@@ -225,7 +280,6 @@ impl SimulatorApp {
     }
 
     fn stop(&mut self) {
-        // TODO
         if let Some(ref mut send_task) = self.app.send_task {
             let _ = send_task.try_send(TaskCommand::Stop);
         }
@@ -258,6 +312,9 @@ impl SimulatorApp {
                 .add(self.top_panel_button(egui::include_image!("../assets/import.svg"), "Import"))
                 .clicked()
             {
+                self.stop();
+                log::info!("Import clicked");
+                crate::simulator::pick_file_into_pico2(ui.ctx().clone(), self.app.pico2.clone());
                 // TODO
             }
 
@@ -270,44 +327,47 @@ impl SimulatorApp {
                 // TODO
             }
 
-            ui.add_space(100.0);
-
-            if self.app.is_running {
-                if self
-                    .top_panel_button(egui::include_image!("../assets/pause.svg"), "Pause")
-                    .ui(ui)
-                    .clicked()
-                {
-                    self.pause();
-                }
-
+            // only show these action with a flashed binary
+            if self.app.pico2.borrow().is_flashed {
                 ui.add_space(100.0);
 
-                if self
-                    .top_panel_button(egui::include_image!("../assets/stop.svg"), "Stop")
-                    .ui(ui)
-                    .clicked()
-                {
-                    self.stop();
-                }
-            } else {
-                if self
-                    .top_panel_button(egui::include_image!("../assets/arrow-right.svg"), "Step")
-                    .ui(ui)
-                    .clicked()
-                {
-                    self.step();
-                }
+                if self.app.is_running {
+                    if self
+                        .top_panel_button(egui::include_image!("../assets/pause.svg"), "Pause")
+                        .ui(ui)
+                        .clicked()
+                    {
+                        self.pause();
+                    }
 
-                ui.add_space(100.0);
+                    ui.add_space(100.0);
 
-                if self
-                    .top_panel_button(egui::include_image!("../assets/play.svg"), "Run")
-                    .ui(ui)
-                    .clicked()
-                {
-                    log::info!("Run clicked");
-                    self.run();
+                    if self
+                        .top_panel_button(egui::include_image!("../assets/stop.svg"), "Stop")
+                        .ui(ui)
+                        .clicked()
+                    {
+                        self.stop();
+                    }
+                } else {
+                    if self
+                        .top_panel_button(egui::include_image!("../assets/arrow-right.svg"), "Step")
+                        .ui(ui)
+                        .clicked()
+                    {
+                        self.step();
+                    }
+
+                    ui.add_space(100.0);
+
+                    if self
+                        .top_panel_button(egui::include_image!("../assets/play.svg"), "Run")
+                        .ui(ui)
+                        .clicked()
+                    {
+                        log::info!("Run clicked");
+                        self.run();
+                    }
                 }
             }
         });
@@ -333,14 +393,28 @@ impl SimulatorApp {
                     ui,
                     egui::include_image!("../assets/memory.svg"),
                     "Memory",
-                    &[Window::BootRom, Window::Sram, Window::BootRam, Window::Xip],
+                    &[
+                        Window::BootRom,
+                        Window::Sram,
+                        Window::BootRam,
+                        Window::Flash,
+                        Window::Xip,
+                    ],
                 );
 
                 self.side_panel_collapsing(
                     ui,
                     egui::include_image!("../assets/peripherals.svg"),
                     "Peripherals",
-                    &[],
+                    &[
+                        Window::Dma,
+                        Window::Spi,
+                        Window::Uart,
+                        Window::I2c,
+                        Window::Pwm,
+                        Window::WatchDog,
+                        Window::Sha256,
+                    ],
                 );
             });
         });

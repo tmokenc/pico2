@@ -21,7 +21,7 @@ eframe = { version = "0.31", default-features = false, features = [
     "x11",     # To support Linux (and CI)
 ] }
 log = "0.4"
-egui_dock = "0.16"
+egui_dock = { version = "0.16", features = ["serde"] }
 
 # You only need serde if you want app persistence:
 serde = { version = "1", features = ["derive"] }
@@ -31,6 +31,9 @@ egui_alignments = {git = "https://github.com/a-littlebit/egui_alignments.git", r
 futures = "0.3"
 web-time = "1"
 gloo = {version = "0.11", features = ["futures", "timers"]}
+ehttp = { version = "0.5", features = ["json"] }
+rfd = "0.15"
+api_types = { path = "../api_types" }
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

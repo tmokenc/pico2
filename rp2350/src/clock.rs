@@ -1,7 +1,17 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use crate::common::MHZ;
+
 pub type EventFn = Box<dyn FnOnce()>;
+pub type IntervalFn = Box<dyn Fn()>;
+
+pub struct Interval {
+    pub name: String,
+    pub period: Duration,
+    pub last_time: Duration,
+    interval_fn: IntervalFn,
+}
 
 pub struct Event {
     pub name: String,
@@ -28,11 +38,13 @@ impl Clock {
         self.ticks += 1;
 
         loop {
-            if let Some((atime, _event)) = self.events.first_key_value() {
-                // check for activation of the event
-                if *atime > self.ticks {
-                    break;
-                }
+            if self
+                .events
+                .first_key_value()
+                .filter(|v| v.0 <= &self.ticks)
+                .is_none()
+            {
+                break;
             }
 
             let (_atime, event) = self.events.pop_first().unwrap();
@@ -67,5 +79,29 @@ impl Clock {
                 true
             }
         });
+    }
+
+    pub fn clk_sys(&self) -> u64 {
+        150 * MHZ
+    }
+
+    pub fn clk_ref(&self) -> u64 {
+        12 * MHZ
+    }
+
+    pub fn clk_peri(&self) -> u64 {
+        150 * MHZ
+    }
+
+    pub fn clk_usb(&self) -> u64 {
+        48 * MHZ
+    }
+
+    pub fn clk_adc(&self) -> u64 {
+        48 * MHZ
+    }
+
+    pub fn clk_hstx(&self) -> u64 {
+        150 * MHZ
     }
 }

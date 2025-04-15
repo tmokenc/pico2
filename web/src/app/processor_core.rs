@@ -3,8 +3,8 @@ use crate::widgets::DisplayMode;
 use egui::Margin;
 use egui::RichText;
 use rp2350::processor::cortex_m33::CortexM33;
-use rp2350::processor::hazard3::Hazard3;
 use rp2350::processor::hazard3::Registers as Hazard3Registers;
+use rp2350::processor::hazard3::{Hazard3, State as Hazard3State};
 use rp2350::processor::Rp2350Core;
 use rp2350::Rp2350;
 
@@ -21,6 +21,8 @@ pub struct ProcessorCore<const T: usize> {
 }
 
 impl<const T: usize> Rp2350Component for ProcessorCore<T> {
+    const NAME: &'static str = name::<T>();
+
     fn ui(&mut self, ui: &mut egui::Ui, rp2350: &mut Rp2350) {
         ui.heading(format!("Processor Core {}", T));
 
@@ -28,6 +30,14 @@ impl<const T: usize> Rp2350Component for ProcessorCore<T> {
             Rp2350Core::Arm(ref processor) => self.ui_arm(ui, processor),
             Rp2350Core::RiscV(ref processor) => self.ui_riscv(ui, processor),
         }
+    }
+}
+
+const fn name<const T: usize>() -> &'static str {
+    if T == 0 {
+        "Processor Core 0"
+    } else {
+        "Processor Core 1"
     }
 }
 
@@ -55,18 +65,35 @@ impl<const T: usize> ProcessorCore<T> {
 
                 ui.end_row();
 
-                ui.label("Executed");
-                ui.label(format!("{} instructions", 0));
+                ui.label("State");
+                ui.label(match hazard3.state {
+                    Hazard3State::Wfi => "WFI".to_owned(),
+                    Hazard3State::Stall(cycles, _) => format!("Stall for ({cycles} cycles)"),
+                    Hazard3State::Normal => "Running".to_owned(),
+                    Hazard3State::Sleep(_) => "Sleep".to_owned(),
+                    Hazard3State::BusWaitStore(_) => "Bus Wait Store".to_owned(),
+                    Hazard3State::BusWaitLoad(rd, _) => format!("Bus Wait Load (rd: x{rd})"),
+                    Hazard3State::Atomic { .. } => "Executing atomic instruction".to_owned(),
+                });
+                ui.end_row();
 
+                let excecuted_inst = hazard3.csrs.minstret;
+                let executed_cycles = hazard3.csrs.mcycles;
+
+                ui.label("Executed");
+                ui.label(format!("{}", excecuted_inst));
                 ui.end_row();
 
                 ui.label("IPC");
-                ui.label(format!("{}", 0));
-
+                ui.label(format!(
+                    "{}",
+                    (excecuted_inst as f64) / (executed_cycles as f64)
+                ));
                 ui.end_row();
 
                 ui.label("PC");
-                ui.label(format!("0x{:08x}", 0));
+                ui.label(format!("0x{:08x}", hazard3.pc));
+                ui.end_row();
             });
 
         ui.add_space(12.0);

@@ -1,6 +1,6 @@
-// ----------------------------------------------------------------------------
-
+use crate::api;
 use egui::Color32;
+use rp2350::simulator::Pico2;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
@@ -12,18 +12,37 @@ pub struct CodeEditor {
 impl Default for CodeEditor {
     fn default() -> Self {
         Self {
-            language: "rs".into(),
-            code: "// A very simple example\n\
-fn main() {\n\
-\tprintln!(\"Hello world!\");\n\
-}\n\
-"
+            language: "c".into(),
+            code: r#"// A very simple example\n\
+int main() {
+    return 0;
+}
+"#
             .into(),
         }
     }
 }
 
 impl CodeEditor {
+    async fn flash_compile_code(&self, pico2: &mut Pico2) {
+        let mut uf2: Vec<u8> = Vec::new();
+        match api::compile(&self.code).await {
+            Ok(_) => {}
+            Err(why) => {
+                // TODO
+            }
+        }
+
+        match pico2.flash_uf2(&uf2) {
+            Ok(_) => {
+                // TODO
+            }
+            Err(why) => {
+                // TODO
+            }
+        }
+    }
+
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let Self { language, code } = self;
 

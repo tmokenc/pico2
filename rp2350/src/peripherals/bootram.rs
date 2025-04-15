@@ -98,6 +98,7 @@ mod tests {
             let $ctx = PeripheralAccessContext {
                 requestor: Requestor::Proc0,
                 secure: true,
+                ..Default::default()
             };
             let mut $bootram = BootRam::default();
         };

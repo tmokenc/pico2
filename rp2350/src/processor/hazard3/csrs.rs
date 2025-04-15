@@ -48,11 +48,11 @@ impl From<u32> for PrivilegeMode {
     }
 }
 
-pub(super) struct Csrs {
-    mcycles: u64,
+pub struct Csrs {
+    pub mcycles: u64,
     medeleg: u32,
     mideleg: u32,
-    minstret: u64,
+    pub minstret: u64,
     pub mstatus: u32,
     pub mie: u32,
     mtvec: u32,

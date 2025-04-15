@@ -7,6 +7,8 @@ pub struct BootRam {
 }
 
 impl Rp2350Component for BootRam {
+    const NAME: &'static str = "Boot RAM";
+
     fn ui(&mut self, ui: &mut egui::Ui, rp2350: &mut Rp2350) {
         ui.heading("Boot RAM");
         self.view.ui(ui, &rp2350.bus.peripherals.bootram.data);

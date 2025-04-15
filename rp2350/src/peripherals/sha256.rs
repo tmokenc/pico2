@@ -23,17 +23,16 @@ const CSR_ERR_WDATA_NOT_RDY: u32 = 1 << 4;
 const CSR_BSWAP: u32 = 1 << 12; // Byte swap
 
 pub struct Sha256 {
-    bswap: bool,
-    dma_size: u8,
-    err_wdata_not_rdy: bool,
-    sum_vld: bool,
-    wdata_rdy: bool,
+    pub bswap: bool,
+    pub dma_size: u8,
+    pub err_wdata_not_rdy: bool,
+    pub sum_vld: bool,
+    pub wdata_rdy: bool,
     // 256 bits result
-    sum: [u8; 32],
-    writed_count: u8,
+    pub sum: [u8; 32],
+    pub writed_count: u8,
 
     sha_core: sha2::Sha256,
-    clock: Rc<RefCell<Clock>>,
 }
 
 impl Default for Sha256 {
@@ -47,17 +46,13 @@ impl Default for Sha256 {
             sum_vld: true,
             wdata_rdy: true,
             sha_core: sha2::Sha256::new(),
-            clock: Default::default(),
         }
     }
 }
 
 impl Sha256 {
-    pub fn new(clock: Rc<RefCell<Clock>>) -> Self {
-        Self {
-            clock,
-            ..Default::default()
-        }
+    pub fn new() -> Self {
+        Default::default()
     }
 }
 
@@ -103,7 +98,7 @@ impl Peripheral for Rc<RefCell<Sha256>> {
         &mut self,
         address: u16,
         value: u32,
-        _ctx: &PeripheralAccessContext,
+        ctx: &PeripheralAccessContext,
     ) -> PeripheralResult<()> {
         let mut inner = self.as_ref().borrow_mut();
 
@@ -143,19 +138,21 @@ impl Peripheral for Rc<RefCell<Sha256>> {
 
                 // Then sleep for 57 cycles to simulate the computation of the hash
                 inner.wdata_rdy = false;
-                let clock = Rc::clone(&inner.clock);
 
                 drop(inner);
                 let self_clone = Rc::clone(self);
 
-                clock.as_ref().borrow_mut().schedule(57, "TRNG", move || {
-                    let mut inner = self_clone.as_ref().borrow_mut();
-                    let sha_core = core::mem::take(&mut inner.sha_core);
-                    let result = sha_core.finalize();
-                    inner.sum = result.into();
-                    inner.sum_vld = true;
-                    inner.writed_count = 0;
-                });
+                ctx.clock
+                    .as_ref()
+                    .borrow_mut()
+                    .schedule(57, "TRNG", move || {
+                        let mut inner = self_clone.as_ref().borrow_mut();
+                        let sha_core = core::mem::take(&mut inner.sha_core);
+                        let result = sha_core.finalize();
+                        inner.sum = result.into();
+                        inner.sum_vld = true;
+                        inner.writed_count = 0;
+                    });
             }
             SUM0 | SUM1 | SUM2 | SUM3 | SUM4 | SUM5 | SUM6 | SUM7 => { /* Read Only */ }
             _ => return Err(PeripheralError::OutOfBounds),

@@ -46,11 +46,8 @@ impl Rp2350 {
         }
     }
 
-    pub fn load_program(&mut self, core_id: usize, program: Vec<u32>) {
-        todo!()
-    }
-
     pub fn tick(&mut self) {
+        self.clock.borrow_mut().tick();
         self.bus.tick();
 
         let mut ctx = ProcessorContext {

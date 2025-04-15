@@ -9,21 +9,25 @@ pub mod bootram;
 pub mod busctrl;
 pub mod clocks;
 pub mod dma;
+pub mod otp;
 pub mod reset;
 pub mod sha256;
 pub mod sio;
 pub mod trng;
 pub mod uart;
+pub mod watchdog;
 
 pub use bootram::BootRam;
 pub use busctrl::BusCtrl;
 pub use clocks::Clocks;
 pub use dma::Dma;
+pub use otp::Otp;
 pub use reset::Reset;
 pub use sha256::Sha256;
 pub use sio::Sio;
 pub use trng::Trng;
 pub use uart::Uart;
+pub use watchdog::WatchDog;
 
 #[derive(Default)]
 pub struct Peripherals {
@@ -51,14 +55,14 @@ pub struct Peripherals {
     pub hstx_ctrl: UnimplementedPeripheral,
     pub xip_ctrl: UnimplementedPeripheral,
     pub xip_qmi: UnimplementedPeripheral,
-    pub watch_dog: UnimplementedPeripheral,
+    pub watch_dog: WatchDog,
     pub bootram: BootRam, // only allow secure access
     pub rosc: UnimplementedPeripheral,
     pub trng: Trng,
     pub sha256: Rc<RefCell<Sha256>>,
     pub powman: UnimplementedPeripheral,
     pub ticks: UnimplementedPeripheral,
-    pub otp: UnimplementedPeripheral,
+    pub otp: Otp,
     pub otp_data: UnimplementedPeripheral,
     pub otp_data_raw: UnimplementedPeripheral,
     pub otp_data_guarded: UnimplementedPeripheral,
@@ -86,6 +90,10 @@ pub struct Peripherals {
 
     // Core local
     pub sio: Sio,
+
+    clock: Rc<RefCell<Clock>>,
+    interrupts: Rc<RefCell<Interrupts>>,
+    gpio: Rc<RefCell<GpioController>>,
 }
 
 impl Peripherals {
@@ -95,11 +103,34 @@ impl Peripherals {
         clock: Rc<RefCell<Clock>>,
     ) -> Self {
         Self {
-            sio: Sio::new(Rc::clone(&gpio), Rc::clone(&interrupts)),
-            sha256: Rc::new(RefCell::new(Sha256::new(Rc::clone(&clock)))),
-            dma: Dma::new(Rc::clone(&interrupts), Rc::clone(&clock)),
+            gpio,
+            interrupts,
+            clock,
             ..Default::default()
         }
+    }
+
+    pub fn get_context(
+        &self,
+        address: u32,
+        requestor: Requestor,
+        secure: bool,
+    ) -> PeripheralAccessContext {
+        PeripheralAccessContext {
+            secure,
+            requestor,
+            address,
+            gpio: Rc::clone(&self.gpio),
+            interrupts: Rc::clone(&self.interrupts),
+            clock: Rc::clone(&self.clock),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        let Self { watch_dog, .. } = core::mem::take(self);
+
+        self.watch_dog = watch_dog;
+        self.watch_dog.reset();
     }
 
     pub fn find_mut(&mut self, address: u32, requestor: Requestor) -> Option<&mut dyn Peripheral> {
@@ -260,10 +291,14 @@ pub enum PeripheralError {
 
 pub type PeripheralResult<T> = std::result::Result<T, PeripheralError>;
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Default, Clone)]
 pub struct PeripheralAccessContext {
     pub secure: bool,
     pub requestor: Requestor,
+    pub address: u32,
+    pub gpio: Rc<RefCell<GpioController>>,
+    pub interrupts: Rc<RefCell<Interrupts>>,
+    pub clock: Rc<RefCell<Clock>>,
 }
 
 // Purpose: Define the Peripheral trait and a default implementation for unimplemented peripherals.
@@ -315,8 +350,11 @@ pub trait Peripheral {
 pub struct UnimplementedPeripheral;
 
 impl Peripheral for UnimplementedPeripheral {
-    fn read(&self, address: u16, _ctx: &PeripheralAccessContext) -> PeripheralResult<u32> {
-        log::warn!("Unimplemented peripheral read at address {:#X}", address);
+    fn read(&self, address: u16, ctx: &PeripheralAccessContext) -> PeripheralResult<u32> {
+        log::warn!(
+            "Unimplemented peripheral read at address {:#X}",
+            ctx.address
+        );
         Ok(0)
     }
 
@@ -324,11 +362,11 @@ impl Peripheral for UnimplementedPeripheral {
         &mut self,
         address: u16,
         value: u32,
-        _ctx: &PeripheralAccessContext,
+        ctx: &PeripheralAccessContext,
     ) -> PeripheralResult<()> {
         log::warn!(
             "Unimplemented peripheral write at address {:#X} with value {:#X}",
-            address,
+            ctx.address,
             value
         );
         Ok(())

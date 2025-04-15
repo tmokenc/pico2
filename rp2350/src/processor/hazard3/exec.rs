@@ -36,7 +36,7 @@ const fn func7(code: u32) -> u32 {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum AtomicOp {
+pub enum AtomicOp {
     Add,
     And,
     Or,
@@ -1954,4 +1954,16 @@ mod tests {
         0b1010, 0b1100 => 0b0110,
         0b1010, 0b1010 => 0,
     ]);
+
+    #[test]
+    fn test_c_mv() {
+        setup!(core, bus);
+        core.set_pc(PC);
+
+        core.registers.write(11, 0xdeadbeefu32);
+        let inst = 0b1000011000101110;
+        let mut ctx = ExecContext::new(&mut core, &mut bus);
+        exec_instruction(0b1000011000101110, &mut ctx);
+        assert_eq!(ctx.register_write, Some((12, 0xdeadbeef)));
+    }
 }

@@ -8,6 +8,8 @@ pub struct Field {
 }
 
 impl Rp2350Component for Field {
+    const NAME: &'static str = "Field";
+
     fn ui(&mut self, ui: &mut egui::Ui, _rp2350: &mut Rp2350) {
         // add radio button to toggle schematic view
         ui.horizontal(|ui| {

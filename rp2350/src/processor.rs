@@ -3,7 +3,7 @@ pub mod hazard3;
 pub mod stats;
 
 use crate::bus::Bus;
-use crate::interrupts::Interrupts;
+use crate::interrupts::{Interrupt, Interrupts};
 pub use cortex_m33::CortexM33;
 pub use hazard3::Hazard3;
 pub use stats::Stats;
@@ -19,6 +19,7 @@ pub trait CpuArchitecture {
     fn set_core_id(&mut self, core_id: u8);
     fn get_pc(&self) -> u32;
     fn set_pc(&mut self, value: u32);
+    // fn set_irq(&mut self, irq: Interrupt);
     fn tick(&mut self, ctx: &mut ProcessorContext);
     fn sleep(&mut self);
     fn wake(&mut self);

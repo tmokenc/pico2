@@ -23,18 +23,16 @@ pub struct Sio {
     spinlock: SpinLock,
     doorbell: DoorBell,
     timer: [RiscVPlatformTimer; 2],
-    gpio: Rc<RefCell<GpioController>>,
     interpolator0: [RefCell<Interpolator<0>>; 2],
     interpolator1: [RefCell<Interpolator<1>>; 2],
     tmds: [TmdsEncoder; 2],
-    interrupts: Rc<RefCell<Interrupts>>,
 
     gpio_value: u32,
     gpio_output_enable: u32
 }
 
 impl Sio {
-    pub fn new(gpio: Rc<RefCell<GpioController>>, interrupts: Rc<RefCell<Interrupts>>) -> Self {
+    pub fn new() -> Self {
         Self {
             mailboxes: RefCell::new(Mailboxes::default()),
             spinlock: SpinLock::default(),
@@ -45,13 +43,11 @@ impl Sio {
             tmds: [TmdsEncoder::default(), TmdsEncoder::default()],
             gpio_value: 0,
             gpio_output_enable: 0,
-            gpio,
-            interrupts,
         }
     }
 
-    fn update_gpio(&self, old_gpio_value: u32, old_gpio_output_enable: u32) {
-        let gpio = self.gpio.as_ref().borrow();
+    fn update_gpio(&self, gpio: Rc<RefCell<GpioController>>, old_gpio_value: u32, old_gpio_output_enable: u32) {
+        let gpio = gpio.as_ref().borrow();
 
         let updated_pins = (self.gpio_value ^ old_gpio_value)
             | (self.gpio_output_enable ^ old_gpio_output_enable);
@@ -161,7 +157,7 @@ impl Peripheral for Sio {
             }
 
             GPIO_IN => {
-                let gpio = self.gpio.as_ref().borrow();
+                let gpio = ctx.gpio.as_ref().borrow();
                 gpio.pins
                     .iter()
                     .map(|pin| pin.value.is_high() as u32)
@@ -287,7 +283,6 @@ impl Peripheral for Sio {
 
         let old_gpio_value = self.gpio_value;
         let old_gpio_output_enable = self.gpio_output_enable;
-        let mut gpio_updated = false;
 
         match address {
             GPIO_OUT => {
@@ -471,7 +466,7 @@ impl Peripheral for Sio {
             _ => return Err(PeripheralError::OutOfBounds),
         }
 
-        self.update_gpio(old_gpio_value, old_gpio_output_enable);
+        self.update_gpio(Rc::clone(&ctx.gpio), old_gpio_value, old_gpio_output_enable);
 
         Ok(())
     }

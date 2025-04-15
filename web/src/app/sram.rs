@@ -7,6 +7,8 @@ pub struct Sram {
 }
 
 impl Rp2350Component for Sram {
+    const NAME: &'static str = "SRAM";
+
     fn ui(&mut self, ui: &mut egui::Ui, rp2350: &mut Rp2350) {
         ui.heading("SRAM");
         self.view.ui(ui, &rp2350.bus.sram);

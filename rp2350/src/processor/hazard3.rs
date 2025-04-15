@@ -4,7 +4,7 @@ pub mod branch_predictor;
 pub mod csrs;
 pub(crate) mod instruction_format;
 pub mod registers;
-pub(crate) mod trap;
+pub mod trap;
 
 use super::{CpuArchitecture, ProcessorContext, Stats};
 use crate::bus::{BusAccessContext, LoadStatus, StoreStatus};
@@ -24,7 +24,7 @@ use trap::*;
 type RegisterWrite = (Register, u32);
 
 #[derive(Default)]
-pub(crate) enum State {
+pub enum State {
     Wfi,
     Stall(u8, RegisterWrite),
     BusWaitLoad(Register, Rc<RefCell<LoadStatus>>),
@@ -181,6 +181,7 @@ impl CpuArchitecture for Hazard3 {
         self.csrs.tick();
 
         if let Some(exception) = exception {
+            log::info!("Exception: {:?}", exception);
             return self.trap_handle(exception);
         } else {
             self.pc = next_pc;

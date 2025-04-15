@@ -42,7 +42,7 @@ impl From<crate::memory::MemoryOutOfBoundsError> for BusError {
 /// Status of a load transaction
 /// this will be wrapped in a RC<RefCell<>> to allow for mutable access to the status
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LoadStatus {
+pub enum LoadStatus {
     #[default]
     Waiting,
     Done(u32),
@@ -53,7 +53,7 @@ pub(crate) enum LoadStatus {
 /// Status of a store transaction
 /// this will be wrapped in a RC<RefCell<>> to allow for mutable access to the status
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum StoreStatus {
+pub enum StoreStatus {
     #[default]
     Waiting,
     Done,
@@ -222,7 +222,7 @@ impl Bus {
         let result = match address & 0xF000_0000 {
             Self::ROM => self.rom.read_u32(address),
             Self::SRAM => self.sram.read_u32(address - Self::SRAM),
-            Self::XIP => self.flash.read_u32(address - Self::XIP),
+            Self::XIP => self.flash.read_u32(address & 0x1FFF_FFFF),
             _ => return Err(BusError::BusFault),
         };
 
@@ -358,17 +358,17 @@ impl Bus {
         match address & 0xF000_0000 {
             Self::ROM => Ok(self.rom.read_u32(address)?),
             Self::SRAM => Ok(self.sram.read_u32(address - Self::SRAM)?),
-            Self::XIP => Ok(self.flash.read_u32(address - Self::XIP)?),
+            Self::XIP => Ok(self.flash.read_u32(address & 0x1FFF_FFFF)?),
             _ => {
-                let peri_ctx = PeripheralAccessContext {
-                    secure: ctx.secure,
-                    requestor: ctx.requestor,
-                };
+                let peri_ctx = self
+                    .peripherals
+                    .get_context(address, ctx.requestor, ctx.secure);
 
                 self.peripherals
                     .find(address, ctx.requestor)
                     .ok_or(BusError::BusFault)?
-                    .read(address as u16, &peri_ctx)
+                    .read((address as u16) & 0xFFF, &peri_ctx)
+                    .inspect_err(|e| log::error!("Peripherals Error at 0x{:X}: {:?}", address, e))
                     .map_err(|_| BusError::BusFault)
             }
         }
@@ -392,12 +392,11 @@ impl Bus {
         match address & 0xF000_0000 {
             Self::ROM => (),
             Self::SRAM => self.sram.write_u32(address - Self::SRAM, value)?,
-            Self::XIP => self.flash.write_u32(address - Self::XIP, value)?,
+            Self::XIP => self.flash.write_u32(address & 0x1FFF_FFFF, value)?,
             _ => {
-                let peri_ctx = PeripheralAccessContext {
-                    secure: ctx.secure,
-                    requestor: ctx.requestor,
-                };
+                let peri_ctx = self
+                    .peripherals
+                    .get_context(address, ctx.requestor, ctx.secure);
 
                 self.peripherals
                     .find_mut(address, ctx.requestor)
@@ -414,7 +413,7 @@ impl Bus {
         match address & 0xF000_0000 {
             Self::ROM => Ok(self.rom.read_u16(address)?),
             Self::SRAM => Ok(self.sram.read_u16(address - Self::SRAM)?),
-            Self::XIP => Ok(self.flash.read_u16(address - Self::XIP)?),
+            Self::XIP => Ok(self.flash.read_u16(address & 0x1FFF_FFFF)?),
             _ => {
                 let value = self.read_u32(address & !0b11, ctx)?;
                 if (address & 0b11) == 0 {
@@ -430,7 +429,7 @@ impl Bus {
         match address & 0xF000_0000 {
             Self::ROM => (),
             Self::SRAM => self.sram.write_u16(address - Self::SRAM, value as u16)?,
-            Self::XIP => self.flash.write_u16(address - Self::XIP, value as u16)?,
+            Self::XIP => self.flash.write_u16(address & 0x1FFF_FFFF, value as u16)?,
             _ => {
                 let value = if (address & 0b11) == 0 {
                     value & 0x0000_FFFF
@@ -449,7 +448,7 @@ impl Bus {
         match address & 0xF000_0000 {
             Self::ROM => Ok(self.rom.read_u8(address)?),
             Self::SRAM => Ok(self.sram.read_u8(address - Self::SRAM)?),
-            Self::XIP => Ok(self.flash.read_u8(address - Self::XIP)?),
+            Self::XIP => Ok(self.flash.read_u8(address & 0x1FFF_FFFF)?),
             _ => {
                 let value = self.read_u32(address & !0b11, ctx)?;
                 let index = address as usize & 0b11;
@@ -462,7 +461,7 @@ impl Bus {
         match address & 0xF000_0000 {
             Self::ROM => (),
             Self::SRAM => self.sram.write_u8(address - Self::SRAM, value as u8)?,
-            Self::XIP => self.flash.write_u8(address - Self::XIP, value as u8)?,
+            Self::XIP => self.flash.write_u8(address & 0x1FFF_FFFF, value as u8)?,
             _ => {
                 let value = value & 0xFF;
                 let value = match address & 0b11 {
