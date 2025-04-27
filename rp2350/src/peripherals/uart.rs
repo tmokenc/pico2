@@ -1,6 +1,12 @@
-use crate::gpio::{FunctionSelect, GpioPinValue};
+//! TODO 
+//! DMA support
+//! Interrupt: UARTINTR and UARTRTINTR
+//! Unsure what they do when reading the datasheet
+
+#![allow(dead_code)]
+
 use super::*;
-use crate::utils::{extract_bit, extract_bits, set_bit, w1c, Fifo};
+use crate::utils::{extract_bit, extract_bits, w1c, Fifo};
 use std::cell::RefCell;
 use std::time::Duration;
 
@@ -75,18 +81,7 @@ const LINE_CTRL_SPS: u8 = 0x1 << 7;
 const IRQ_UARTRXINTR: u16 = 0x1 << 4;
 const IRQ_UARTTXINTR: u16 = 0x1 << 5;
 
-
-enum UartReceivingState {
-    WaitStartBit,
-    WaitDataBit,
-    WaitParityBit,
-    WaitStopBit,
-}
-
-
-
-
-pub struct Uart<const Idx: usize> {
+pub struct Uart<const IDX: usize> {
     // receive are 12 bit wide
     rx_fifo: Fifo<u16, FIFO_DEPTH>,
     tx_fifo: Fifo<u8, FIFO_DEPTH>,
@@ -101,11 +96,11 @@ pub struct Uart<const Idx: usize> {
     interrupt_mask: u16,
     error: u8,
     fifo_level_select: u8,
-    
+
     dma_ctrl: u8,
 }
 
-impl<const Idx: usize> Default for Uart<Idx> {
+impl<const IDX: usize> Default for Uart<IDX> {
     fn default() -> Self {
         Self {
             rx_fifo: Default::default(),
@@ -126,7 +121,7 @@ impl<const Idx: usize> Default for Uart<Idx> {
     }
 }
 
-impl<const Idx: usize> Uart<Idx> {
+impl<const IDX: usize> Uart<IDX> {
     fn update_baudrate(&mut self, divint: impl Into<Option<u16>>, divfrac: impl Into<Option<u8>>) {
         if let Some(divint) = divint.into() {
             self.baud_divint = divint;
@@ -255,26 +250,12 @@ impl<const Idx: usize> Uart<Idx> {
             }
         }
 
-        if self.tx_fifo.is_empty() {
-            self.flags |= FLAG_TXFE;
-        } else {
-            self.flags &= !FLAG_TXFE;
-        }
-
-        if self.rx_fifo.is_empty() {
-            self.flags |= FLAG_RXFE;
-        } else {
-            self.flags &= !FLAG_RXFE;
-        }
-
-        if self.tx_fifo.is_full() {
-            self.flags |= FLAG_TXFF;
-        } else {
-            self.flags &= !FLAG_TXFF;
-        }
+        let error_irq_mask = 0b1111 << 7;
+        self.interrupt_status &= !error_irq_mask;
+        self.interrupt_status |= (self.error as u16) << 7;
 
         let int = self.interrupt_mask & self.interrupt_status;
-        let int_num = Interrupts::UART0_IRQ + Idx as u8;
+        let int_num = Interrupts::UART0_IRQ + IDX as u8;
 
         interrupts.borrow_mut().set_irq(int_num, int != 0);
     }
@@ -320,7 +301,7 @@ impl<const Idx: usize> Uart<Idx> {
     }
 }
 
-impl<const Idx: usize> Peripheral for Rc<RefCell<Uart<Idx>>> {
+impl<const IDX: usize> Peripheral for Rc<RefCell<Uart<IDX>>> {
     fn read(&self, address: u16, ctx: &PeripheralAccessContext) -> PeripheralResult<u32> {
         let mut uart = self.borrow_mut();
 
@@ -359,7 +340,7 @@ impl<const Idx: usize> Peripheral for Rc<RefCell<Uart<Idx>>> {
             UARTICR | UARTRIS => uart.interrupt_status as u32,
             UARTMIS => (uart.interrupt_status & uart.interrupt_mask) as u32,
 
-            
+
             UARTDMACR => uart.dma_ctrl as u32,
 
             UARTPERIPHID0 => 0x11,
@@ -389,7 +370,7 @@ impl<const Idx: usize> Peripheral for Rc<RefCell<Uart<Idx>>> {
         let mut uart = self.borrow_mut();
         match address {
             UARTRSR  // TODO
-            | UARTFR 
+            | UARTFR
             | UARTILPR 
             | UARTIFLS => (), // TODO
 

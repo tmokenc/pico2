@@ -17,11 +17,11 @@ enum TransmitState {
     StopBit(u8),
 }
 
-pub(super) fn start_transmitting<const Idx: usize>(
-    uart_ref: Rc<RefCell<Uart<Idx>>>,
+pub(super) fn start_transmitting<const IDX: usize>(
+    uart_ref: Rc<RefCell<Uart<IDX>>>,
     ctx: &PeripheralAccessContext,
 ) {
-    if ctx.clock.is_scheduled(EventType::UartTx(Idx)) {
+    if ctx.clock.is_scheduled(EventType::UartTx(IDX)) {
         return;
     }
 
@@ -41,8 +41,8 @@ pub(super) fn start_transmitting<const Idx: usize>(
     );
 }
 
-fn transmit<const Idx: usize>(
-    uart_ref: Rc<RefCell<Uart<Idx>>>,
+fn transmit<const IDX: usize>(
+    uart_ref: Rc<RefCell<Uart<IDX>>>,
     data: u8,
     state: TransmitState,
     clock: Rc<Clock>,
@@ -127,19 +127,19 @@ fn transmit<const Idx: usize>(
 
     gpio_ref
         .borrow_mut()
-        .set_by_func_sel(tx_gpio_func::<Idx>(), bit);
+        .set_by_func_sel(tx_gpio_func::<IDX>(), bit);
 
     clock
         .clone()
-        .schedule(bit_time, EventType::UartTx(Idx), move || {
+        .schedule(bit_time, EventType::UartTx(IDX), move || {
             transmit(
                 uart_ref, data, next_state, clock, interrupts, gpio_ref, inspector,
             );
         });
 }
 
-const fn tx_gpio_func<const Idx: usize>() -> FunctionSelect {
-    match Idx {
+const fn tx_gpio_func<const IDX: usize>() -> FunctionSelect {
+    match IDX {
         0 => FunctionSelect::UART0_TX,
         1 => FunctionSelect::UART1_TX,
         _ => unreachable!(),

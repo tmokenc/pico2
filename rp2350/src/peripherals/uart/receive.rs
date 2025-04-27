@@ -16,11 +16,11 @@ use super::FRAME_ERROR;
 use super::OVERRUN_ERROR;
 use super::PARITY_ERROR;
 
-pub(super) fn start_receiving<const Idx: usize>(
-    uart: Rc<RefCell<Uart<Idx>>>,
+pub(super) fn start_receiving<const IDX: usize>(
+    uart: Rc<RefCell<Uart<IDX>>>,
     ctx: &PeripheralAccessContext,
 ) {
-    if ctx.clock.is_scheduled(EventType::UartRx(Idx)) {
+    if ctx.clock.is_scheduled(EventType::UartRx(IDX)) {
         return;
     }
 
@@ -35,12 +35,12 @@ pub(super) fn start_receiving<const Idx: usize>(
     );
 }
 
-pub(super) fn abort_receiving<const Idx: usize>(
-    _uart: Rc<RefCell<Uart<Idx>>>,
+pub(super) fn abort_receiving<const IDX: usize>(
+    _uart: Rc<RefCell<Uart<IDX>>>,
     ctx: &PeripheralAccessContext,
 ) {
     // TODO change flags?
-    ctx.clock.cancel(EventType::UartRx(Idx));
+    ctx.clock.cancel(EventType::UartRx(IDX));
 }
 
 #[derive(Clone, Copy)]
@@ -52,8 +52,8 @@ enum ReceiveState {
     StopBit { index: u8 },
 }
 
-fn receive<const Idx: usize>(
-    uart_ref: Rc<RefCell<Uart<Idx>>>,
+fn receive<const IDX: usize>(
+    uart_ref: Rc<RefCell<Uart<IDX>>>,
     mut data: u8,
     state: ReceiveState,
     clock: Rc<Clock>,
@@ -67,7 +67,7 @@ fn receive<const Idx: usize>(
     let mut next_state: ReceiveState = state;
     let mut gpio = gpio_ref.borrow_mut();
 
-    if let Some(gpio_pin) = gpio.select(rx_gpio_func::<Idx>()) {
+    if let Some(gpio_pin) = gpio.select(rx_gpio_func::<IDX>()) {
         let bit = gpio_pin.value.is_high() as u8;
 
         match state {
@@ -107,12 +107,15 @@ fn receive<const Idx: usize>(
 
                 if parity != bit {
                     uart.error |= PARITY_ERROR;
+                    uart.update_interrupt(interrupts.clone());
                 }
             }
             ReceiveState::StopBit { index } => {
                 if bit != 1 {
                     // invalid stop bit
                     uart.error |= FRAME_ERROR;
+                    uart.update_interrupt(interrupts.clone());
+                    next_state = ReceiveState::Idle { last_bit: bit };
                 } else if uart.two_stop_bits() && index == 1 {
                     // All stop bits received, move to idle state
                     next_state = ReceiveState::Idle { last_bit: bit };
@@ -123,6 +126,7 @@ fn receive<const Idx: usize>(
 
                     if let Err(_why) = uart.rx_fifo.push(data) {
                         uart.error |= OVERRUN_ERROR;
+                        uart.update_interrupt(interrupts.clone());
                     }
                 } else {
                     // Move to next stop bit
@@ -136,7 +140,7 @@ fn receive<const Idx: usize>(
     let uart_ref = uart_ref.clone();
     let gpio_ref = gpio_ref.clone();
 
-    clock.schedule(bit_time, EventType::UartRx(Idx), move || {
+    clock.schedule(bit_time, EventType::UartRx(IDX), move || {
         receive(
             uart_ref,
             data,
@@ -149,8 +153,8 @@ fn receive<const Idx: usize>(
     });
 }
 
-const fn rx_gpio_func<const Idx: usize>() -> FunctionSelect {
-    match Idx {
+const fn rx_gpio_func<const IDX: usize>() -> FunctionSelect {
+    match IDX {
         0 => FunctionSelect::UART0_RX,
         1 => FunctionSelect::UART1_RX,
         _ => unreachable!(),
