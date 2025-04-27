@@ -474,7 +474,7 @@ mod tests {
             let mut $ctx = ProcessorContext {
                 bus: &mut bus,
                 wake_opposite_core: false,
-                inspector: std::rc::Rc::new(DummyInspector) as Rc<dyn Inspector>,
+                inspector: InspectorRef::default(),
             };
         };
     }

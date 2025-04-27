@@ -5,6 +5,7 @@ use crate::interrupts::Interrupts;
 use crate::memory::*;
 use crate::peripherals::*;
 use crate::utils::*;
+use crate::InspectorRef;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -101,13 +102,14 @@ pub struct Bus {
     pub peripherals: Peripherals,
 
     // Internal states
-    dma_access: Option<Status>,
+    dma_read_access: Option<Status>,
+    dma_write_access: Option<Status>,
     core0_access: Option<Status>,
     core1_access: Option<Status>,
 
     core0_exclusive: Option<u32>, // address
     core1_exclusive: Option<u32>, // address
-    dma_exclusive: Option<u32>,   // ?? not sure if this is needed, added just in case
+    inspector: InspectorRef,
 }
 
 impl Default for Bus {
@@ -117,12 +119,13 @@ impl Default for Bus {
             rom: GenericMemory::default(),
             flash: GenericMemory::default(),
             peripherals: Peripherals::default(),
-            dma_access: None,
+            dma_write_access: None,
+            dma_read_access: None,
             core0_access: None,
             core1_access: None,
             core0_exclusive: None,
             core1_exclusive: None,
-            dma_exclusive: None,
+            inspector: InspectorRef::default(),
         };
 
         res.set_rom(*include_bytes!("../bootrom-combined.bin"));
@@ -144,9 +147,11 @@ impl Bus {
         gpio: Rc<RefCell<GpioController>>,
         interrupts: Rc<RefCell<Interrupts>>,
         clock: Rc<Clock>,
+        inspector: InspectorRef,
     ) -> Self {
         Self {
-            peripherals: Peripherals::new(gpio, interrupts, clock),
+            peripherals: Peripherals::new(gpio, interrupts, clock, inspector.clone()),
+            inspector,
             ..Default::default()
         }
     }
@@ -162,14 +167,17 @@ impl Bus {
     pub fn tick(&mut self) {
         let mut core0_access = self.core0_access.take();
         let mut core1_access = self.core1_access.take();
-        let mut dma_access = self.dma_access.take();
+        let mut dma_read_access = self.dma_read_access.take();
+        let mut dma_write_access = self.dma_write_access.take();
 
         self.update_status(&mut core0_access);
         self.update_status(&mut core1_access);
-        self.update_status(&mut dma_access);
+        self.update_status(&mut dma_read_access);
+        self.update_status(&mut dma_write_access);
         self.core0_access = core0_access;
         self.core1_access = core1_access;
-        self.dma_access = dma_access;
+        self.dma_read_access = dma_read_access;
+        self.dma_write_access = dma_write_access;
     }
 
     fn update_status(&mut self, target_status: &mut Option<Status>) {
@@ -273,7 +281,8 @@ impl Bus {
         match ctx.requestor {
             Requestor::Proc0 => self.core0_access = Some(status),
             Requestor::Proc1 => self.core1_access = Some(status),
-            Requestor::DmaR | Requestor::DmaW => self.dma_access = Some(status),
+            Requestor::DmaR => self.dma_read_access = Some(status),
+            Requestor::DmaW => self.dma_write_access = Some(status),
         }
 
         Ok(load_status)
@@ -305,7 +314,8 @@ impl Bus {
         match ctx.requestor {
             Requestor::Proc0 => self.core0_access = Some(status),
             Requestor::Proc1 => self.core1_access = Some(status),
-            Requestor::DmaR | Requestor::DmaW => self.dma_access = Some(status),
+            Requestor::DmaR => self.dma_read_access = Some(status),
+            Requestor::DmaW => self.dma_write_access = Some(status),
         }
 
         Ok(store_status)
@@ -342,13 +352,9 @@ impl Bus {
             Requestor::Proc0 => self
                 .core1_exclusive
                 .filter(|addr| *addr == address)
-                .or_else(|| self.dma_exclusive)
-                .filter(|addr| *addr == address)
                 .is_none(),
             Requestor::Proc1 => self
                 .core0_exclusive
-                .filter(|addr| *addr == address)
-                .or_else(|| self.dma_exclusive)
                 .filter(|addr| *addr == address)
                 .is_none(),
             Requestor::DmaR | Requestor::DmaW => self
@@ -370,7 +376,7 @@ impl Bus {
             match ctx.requestor {
                 Requestor::Proc0 => self.core0_exclusive = Some(address),
                 Requestor::Proc1 => self.core1_exclusive = Some(address),
-                Requestor::DmaR | Requestor::DmaW => self.dma_exclusive = Some(address),
+                Requestor::DmaR | Requestor::DmaW => unreachable!(),
             }
         }
 
@@ -404,7 +410,7 @@ impl Bus {
             match ctx.requestor {
                 Requestor::Proc0 => self.core0_exclusive = None,
                 Requestor::Proc1 => self.core1_exclusive = None,
-                Requestor::DmaR | Requestor::DmaW => self.dma_exclusive = None,
+                Requestor::DmaR | Requestor::DmaW => unreachable!(),
             }
         }
 
@@ -509,6 +515,7 @@ mod tests {
                 Rc::new(RefCell::new(GpioController::default())),
                 Rc::new(RefCell::new(Interrupts::default())),
                 Rc::new(Clock::new(150_000_000)),
+                InspectorRef::default(),
             );
         };
     }

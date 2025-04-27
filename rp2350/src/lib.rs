@@ -16,7 +16,6 @@ mod utils;
 pub type Time = u64;
 
 pub use error::Error as SimulatorError;
-pub use inspector::Inspector;
+pub use inspector::{InspectionEvent, Inspector, InspectorRef};
 pub use rp2350::Rp2350;
 pub type Result<T> = core::result::Result<T, SimulatorError>;
-pub type InspectorRef = std::rc::Rc<dyn Inspector>;

@@ -1,36 +1,89 @@
+use std::rc::Rc;
+
 #[derive(Debug, Clone)]
-pub struct ExecutedInstruction {
-    pub instruction: u32,
-    pub address: u32,
-    pub name: String,
-    pub operands: Vec<u32>,
+pub enum InspectionEvent {
+    TrngGenerated(u32),
+    ExecutedInstruction {
+        core: u8,
+        instruction: u32,
+        address: u32,
+        name: String,
+        operands: Vec<u32>,
+    },
+    Tick(u8),
+    WakeCore(u8),
+
+    UartTx(u8),
+    UartRx(u16),
 }
 
 pub trait Inspector {
-    fn trng_generated(&self, value: u32) {
-        log::info!("TRNG generated value: {:#X}", value);
+    fn handle_event(&self, event: InspectionEvent);
+}
+
+#[derive(Clone)]
+pub struct InspectorRef {
+    inspector: Rc<dyn Inspector>,
+}
+
+impl Default for InspectorRef {
+    fn default() -> Self {
+        Self {
+            inspector: Rc::new(DummyInspector),
+        }
+    }
+}
+
+impl Inspector for InspectorRef {
+    fn handle_event(&self, event: InspectionEvent) {
+        self.inspector.handle_event(event);
+    }
+}
+
+impl InspectorRef {
+    pub fn set_inspector(&mut self, inspector: Rc<dyn Inspector>) {
+        self.inspector = inspector;
     }
 
-    fn executed_instruction(&self, core: u8, value: ExecutedInstruction) {
-        log::info!(
-            "Core {} executed instruction {:#X} at address {:#X} - {} {:?}",
-            core,
-            value.instruction,
-            value.address,
-            value.name,
-            value.operands
-        );
-    }
-
-    fn tick(&self, core: u8) {
-        log::trace!("Ticking core {}", core);
-    }
-
-    fn wake_core(&self, core: u8) {
-        log::info!("Waking core {}", core);
+    pub fn raise(&self, event: InspectionEvent) {
+        self.inspector.handle_event(event);
     }
 }
 
 pub struct DummyInspector;
 
-impl Inspector for DummyInspector {}
+impl Inspector for DummyInspector {
+    fn handle_event(&self, event: InspectionEvent) {
+        match event {
+            InspectionEvent::TrngGenerated(value) => {
+                log::info!("RNG: generated value: {value}");
+            }
+            InspectionEvent::ExecutedInstruction {
+                core,
+                instruction,
+                address,
+                name,
+                operands,
+            } => {
+                log::info!(
+                    "Core {core}: Executed instruction: {instruction:#010x} at {address:#010x} - {name}({:?})",
+                    operands
+                );
+            }
+            InspectionEvent::Tick(core) => {
+                log::info!("Core {core}: Tick event");
+            }
+            InspectionEvent::WakeCore(core) => {
+                log::info!("Core {core}: Wake event");
+            }
+
+            InspectionEvent::UartTx(core) => {
+                log::info!("Core {core}: UART TX event");
+            }
+
+            InspectionEvent::UartRx(value) => {
+                log::info!("UART RX event: {value}");
+            }
+        }
+    }
+}

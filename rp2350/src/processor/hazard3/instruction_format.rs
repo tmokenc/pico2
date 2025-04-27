@@ -241,6 +241,8 @@ fn load_imm(bits: u32, positions: &[RangeInclusive<u32>], signed: bool) -> u32 {
 
 #[cfg(test)]
 mod test {
+    #![allow(non_snake_case)]
+
     use super::*;
 
     #[test]

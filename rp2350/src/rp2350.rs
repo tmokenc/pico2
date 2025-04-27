@@ -2,7 +2,7 @@ use crate::bus::Bus;
 use crate::clock::Clock;
 use crate::common::{MB, MHZ};
 use crate::gpio::GpioController;
-use crate::inspector::Inspector;
+use crate::inspector::{InspectionEvent, Inspector, InspectorRef};
 use crate::interrupts::Interrupts;
 use crate::processor::{ProcessorContext, Rp2350Core};
 use crate::Result;
@@ -16,7 +16,7 @@ pub struct Rp2350 {
     pub dma: Rc<RefCell<crate::peripherals::Dma>>,
     pub gpio: Rc<RefCell<GpioController>>,
     pub interrupts: Rc<RefCell<Interrupts>>,
-    inspector: Rc<dyn crate::inspector::Inspector>,
+    inspector: InspectorRef,
 }
 
 impl Default for Rp2350 {
@@ -41,9 +41,14 @@ impl Rp2350 {
         // By default the second core is sleeping
         processor[1].sleep();
 
-        let bus = Bus::new(Rc::clone(&gpio), Rc::clone(&interrupts), Rc::clone(&clock));
+        let inspector = InspectorRef::default();
+        let bus = Bus::new(
+            Rc::clone(&gpio),
+            Rc::clone(&interrupts),
+            Rc::clone(&clock),
+            inspector.clone(),
+        );
         let dma = Rc::clone(&bus.peripherals.dma);
-        let inspector = Rc::new(crate::inspector::DummyInspector);
 
         Self {
             bus,
@@ -57,7 +62,7 @@ impl Rp2350 {
     }
 
     pub fn set_inspector(&mut self, inspector: Rc<dyn crate::inspector::Inspector>) {
-        self.inspector = inspector;
+        self.inspector.set_inspector(inspector);
     }
 
     pub fn flash_bin(&mut self, bin: &[u8]) -> Result<()> {
@@ -102,16 +107,16 @@ impl Rp2350 {
 
         let mut ctx = ProcessorContext {
             bus: &mut self.bus,
-            inspector: Rc::clone(&self.inspector),
+            inspector: self.inspector.clone(),
             wake_opposite_core: false,
         };
 
-        self.inspector.tick(1);
+        self.inspector.raise(InspectionEvent::Tick(0));
         self.processor[0].tick(&mut ctx);
         let wake_core_1 = ctx.wake_opposite_core;
         ctx.wake_opposite_core = false;
 
-        self.inspector.tick(0);
+        self.inspector.raise(InspectionEvent::Tick(1));
         self.processor[1].tick(&mut ctx);
         let wake_core_0 = ctx.wake_opposite_core;
 
@@ -119,12 +124,12 @@ impl Rp2350 {
 
         // only wake after both cores have ticked
         if wake_core_1 {
-            self.inspector.wake_core(1);
+            self.inspector.raise(InspectionEvent::WakeCore(1));
             self.processor[1].wake();
         }
 
         if wake_core_0 {
-            self.inspector.wake_core(0);
+            self.inspector.raise(InspectionEvent::WakeCore(0));
             self.processor[0].wake();
         }
     }

@@ -32,7 +32,7 @@ pub enum ArchitectureType {
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DataSize {
+pub enum DataSize {
     Byte = 1,
     HalfWord = 2,
     #[default]

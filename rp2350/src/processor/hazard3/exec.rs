@@ -1517,6 +1517,8 @@ pub(super) fn exec_instruction(code: u32, ctx: &mut ExecContext<'_>) {
 
 #[cfg(test)]
 mod tests {
+    #![allow(unused_variables)]
+
     use super::*;
     use crate::bus::Bus;
     use crate::clock::Clock;
@@ -1535,7 +1537,7 @@ mod tests {
 
             let mut $core = Hazard3::new(Rc::clone(&interrupts));
             $core.set_pc(PC);
-            let mut $bus = Bus::new(gpio, interrupts, clock);
+            let mut $bus = Bus::new(gpio, interrupts, clock, Default::default());
         };
     }
 
