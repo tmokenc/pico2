@@ -4,6 +4,7 @@ pub mod stats;
 
 use crate::bus::Bus;
 use crate::interrupts::{Interrupt, Interrupts};
+use crate::InspectorRef;
 pub use cortex_m33::CortexM33;
 pub use hazard3::Hazard3;
 pub use stats::Stats;
@@ -12,6 +13,7 @@ use std::rc::Rc;
 
 pub struct ProcessorContext<'a> {
     pub bus: &'a mut Bus,
+    pub inspector: InspectorRef,
     pub wake_opposite_core: bool,
 }
 
