@@ -14,10 +14,15 @@ pub struct Fifo<T, const N: usize> {
     size: usize,
 }
 
-impl<T: Default + Copy, const N: usize> Default for Fifo<T, N> {
+impl<T: Default, const N: usize> Default for Fifo<T, N> {
     fn default() -> Self {
         Fifo {
-            data: [Default::default(); N],
+            data: (0..N)
+                .map(|_| Default::default())
+                .collect::<Vec<T>>()
+                .try_into()
+                .map_err(|_| ())
+                .unwrap(),
             head: 0,
             size: 0,
         }
@@ -49,6 +54,10 @@ impl<T: Default, const N: usize> Fifo<T, N> {
         Some(value)
     }
 
+    pub fn len(&self) -> usize {
+        self.size
+    }
+
     pub fn is_empty(&self) -> bool {
         self.size == 0
     }
@@ -70,33 +79,43 @@ mod tests {
         assert!(fifo.pop().is_none());
 
         fifo.push(1).unwrap();
+        assert_eq!(fifo.len(), 1);
         assert!(!fifo.is_empty());
         assert!(!fifo.is_full());
         fifo.push(2).unwrap();
+        assert_eq!(fifo.len(), 2);
         assert!(!fifo.is_empty());
         assert!(!fifo.is_full());
         fifo.push(3).unwrap();
+        assert_eq!(fifo.len(), 3);
         assert!(!fifo.is_empty());
         assert!(!fifo.is_full());
         fifo.push(4).unwrap();
+        assert_eq!(fifo.len(), 4);
         assert!(!fifo.is_empty());
         assert!(fifo.is_full());
         assert_eq!(fifo.push(5), Err(FifoError::Full));
+        assert_eq!(fifo.len(), 4);
         assert!(!fifo.is_empty());
         assert!(fifo.is_full());
 
         assert_eq!(fifo.pop(), Some(1));
+        assert_eq!(fifo.len(), 3);
         assert!(!fifo.is_empty());
         assert!(!fifo.is_full());
         assert_eq!(fifo.pop(), Some(2));
+        assert_eq!(fifo.len(), 2);
         assert!(!fifo.is_empty());
         assert!(!fifo.is_full());
         assert_eq!(fifo.pop(), Some(3));
+        assert_eq!(fifo.len(), 1);
         assert!(!fifo.is_empty());
         assert!(!fifo.is_full());
         assert_eq!(fifo.pop(), Some(4));
+        assert_eq!(fifo.len(), 0);
         assert!(fifo.is_empty());
         assert!(fifo.pop().is_none());
+        assert_eq!(fifo.len(), 0);
         assert!(fifo.is_empty());
     }
 }
