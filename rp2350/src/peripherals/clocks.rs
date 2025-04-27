@@ -98,7 +98,7 @@ impl<const DIV_MASK: u32> ClockState<DIV_MASK> {
         // clear all bits except the 28th
         self.ctrl &= Self::CLK_ENABLE_MASK;
         // set the new value (reserve the 28th bit)
-        self.ctrl |= (value & !Self::CLK_ENABLE_MASK);
+        self.ctrl |= value & !Self::CLK_ENABLE_MASK;
     }
 }
 
@@ -111,7 +111,7 @@ pub enum ClockMode {
 pub struct Clocks {
     pub gp_outs: [ClockState<0xFFFF_FFFF>; 4],
     pub clk_ref: ClockState<{ 0xFF << 16 }>,
-    pub clk_sys: ClockState<{ 0xFFFF_FFFF }>,
+    pub clk_sys: ClockState<0xFFFF_FFFF>,
     pub clk_peri: ClockState<{ 0b11 << 16 }>,
     pub clk_hstx: ClockState<{ 0b11 << 16 }>,
     pub clk_usb: ClockState<{ 0b1111 << 16 }>,

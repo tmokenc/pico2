@@ -1,7 +1,7 @@
 use crate::clock::Clock;
-use crate::common::*;
 use crate::gpio::GpioController;
 use crate::interrupts::Interrupts;
+use crate::{common::*, Inspector, InspectorRef};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -46,9 +46,12 @@ pub struct Peripherals {
     pub pll_usb: UnimplementedPeripheral,
     pub accessctrl: UnimplementedPeripheral,
     pub busctrl: BusCtrl,
-    pub uart: [Uart; 2],
-    pub spi: [UnimplementedPeripheral; 2],
-    pub i2c: [UnimplementedPeripheral; 2],
+    pub uart0: Rc<RefCell<Uart<0>>>,
+    pub uart1: Rc<RefCell<Uart<1>>>,
+    pub spi0: UnimplementedPeripheral,
+    pub spi1: UnimplementedPeripheral,
+    pub i2c0: UnimplementedPeripheral,
+    pub i2c1: UnimplementedPeripheral,
     pub adc: UnimplementedPeripheral,
     pub pwm: UnimplementedPeripheral,
     pub timer: [UnimplementedPeripheral; 2],
@@ -94,6 +97,7 @@ pub struct Peripherals {
     clock: Rc<Clock>,
     interrupts: Rc<RefCell<Interrupts>>,
     gpio: Rc<RefCell<GpioController>>,
+    inspector: InspectorRef,
 }
 
 impl Peripherals {
@@ -101,11 +105,13 @@ impl Peripherals {
         gpio: Rc<RefCell<GpioController>>,
         interrupts: Rc<RefCell<Interrupts>>,
         clock: Rc<Clock>,
+        inspector: InspectorRef,
     ) -> Self {
         Self {
             gpio,
             interrupts,
             clock,
+            inspector,
             ..Default::default()
         }
     }
@@ -124,6 +130,7 @@ impl Peripherals {
             interrupts: Rc::clone(&self.interrupts),
             clock: Rc::clone(&self.clock),
             dma: Rc::clone(&self.dma),
+            inspector: self.inspector.clone(),
         }
     }
 
@@ -155,12 +162,12 @@ impl Peripherals {
             0x4005_8000 => &mut self.pll_usb as &mut dyn Peripheral,
             0x4006_0000 => &mut self.accessctrl as &mut dyn Peripheral,
             0x4006_8000 => &mut self.busctrl as &mut dyn Peripheral,
-            0x4007_0000 => &mut self.uart[0] as &mut dyn Peripheral,
-            0x4007_8000 => &mut self.uart[1] as &mut dyn Peripheral,
-            0x4008_0000 => &mut self.spi[0] as &mut dyn Peripheral,
-            0x4008_8000 => &mut self.spi[1] as &mut dyn Peripheral,
-            0x4009_0000 => &mut self.i2c[0] as &mut dyn Peripheral,
-            0x4009_8000 => &mut self.i2c[1] as &mut dyn Peripheral,
+            0x4007_0000 => &mut self.uart0 as &mut dyn Peripheral,
+            0x4007_8000 => &mut self.uart1 as &mut dyn Peripheral,
+            0x4008_0000 => &mut self.spi0 as &mut dyn Peripheral,
+            0x4008_8000 => &mut self.spi1 as &mut dyn Peripheral,
+            0x4009_0000 => &mut self.i2c0 as &mut dyn Peripheral,
+            0x4009_8000 => &mut self.i2c1 as &mut dyn Peripheral,
             0x400A_0000 => &mut self.adc as &mut dyn Peripheral,
             0x400A_8000 => &mut self.pwm as &mut dyn Peripheral,
             0x400B_0000 => &mut self.timer[0] as &mut dyn Peripheral,
@@ -227,12 +234,12 @@ impl Peripherals {
             0x4005_8000 => &self.pll_usb as &dyn Peripheral,
             0x4006_0000 => &self.accessctrl as &dyn Peripheral,
             0x4006_8000 => &self.busctrl as &dyn Peripheral,
-            0x4007_0000 => &self.uart[0] as &dyn Peripheral,
-            0x4007_8000 => &self.uart[1] as &dyn Peripheral,
-            0x4008_0000 => &self.spi[0] as &dyn Peripheral,
-            0x4008_8000 => &self.spi[1] as &dyn Peripheral,
-            0x4009_0000 => &self.i2c[0] as &dyn Peripheral,
-            0x4009_8000 => &self.i2c[1] as &dyn Peripheral,
+            0x4007_0000 => &self.uart0 as &dyn Peripheral,
+            0x4007_8000 => &self.uart1 as &dyn Peripheral,
+            0x4008_0000 => &self.spi0 as &dyn Peripheral,
+            0x4008_8000 => &self.spi1 as &dyn Peripheral,
+            0x4009_0000 => &self.i2c0 as &dyn Peripheral,
+            0x4009_8000 => &self.i2c1 as &dyn Peripheral,
             0x400A_0000 => &self.adc as &dyn Peripheral,
             0x400A_8000 => &self.pwm as &dyn Peripheral,
             0x400B_0000 => &self.timer[0] as &dyn Peripheral,
@@ -302,6 +309,7 @@ pub struct PeripheralAccessContext {
     pub interrupts: Rc<RefCell<Interrupts>>,
     pub clock: Rc<Clock>,
     pub dma: Rc<RefCell<Dma>>,
+    pub inspector: InspectorRef,
 }
 
 // Purpose: Define the Peripheral trait and a default implementation for unimplemented peripherals.

@@ -1,3 +1,5 @@
+use crate::inspector::InspectionEvent;
+
 use super::*;
 
 pub const RNG_IMR: u16 = 0x0100; // RNG interrupt mask register.
@@ -65,7 +67,7 @@ impl Default for Trng {
 }
 
 impl Peripheral for Trng {
-    fn read(&self, address: u16, _ctx: &PeripheralAccessContext) -> PeripheralResult<u32> {
+    fn read(&self, address: u16, ctx: &PeripheralAccessContext) -> PeripheralResult<u32> {
         let value = match address {
             RNG_IMR => self.interrupt_mask as u32,
             RNG_ISR => self.interrupts as u32,
@@ -75,7 +77,8 @@ impl Peripheral for Trng {
             EHR_DATA0..=EHR_DATA5 => {
                 // simulating the rng entropy by generate it when needed
                 let value = getrandom::u32().unwrap_or_default();
-                log::info!("RNG: generated value: {value}");
+                ctx.inspector
+                    .handle_event(InspectionEvent::TrngGenerated(value));
                 value
 
                 // The below is implementation according to the datasheet

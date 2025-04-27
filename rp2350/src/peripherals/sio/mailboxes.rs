@@ -1,7 +1,5 @@
 use crate::common::Requestor;
 use crate::utils::Fifo;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 #[derive(Default)]
 pub struct Mailboxes {

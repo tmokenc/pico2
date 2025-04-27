@@ -48,7 +48,7 @@ pub const MULTI_CHAN_TRIGGER: u16 = 0x450;
 pub const SNIFF_CTRL: u16 = 0x454;
 pub const SNIFF_DATA: u16 = 0x458;
 pub const FIFO_LEVELS: u16 = 0x460;
-pub const CHAN_ABORT: u16 = 0x454;
+pub const CHAN_ABORT: u16 = 0x464;
 pub const N_CHANNELS: u16 = 0x468;
 
 // 16 channels

@@ -447,7 +447,7 @@ impl Peripheral for Sio {
             | TMDS_PEEK_DOUBLE_L2
             | TMDS_POP_DOUBLE_L2 => {}, // TODO
                                        
-            CPUID // TODO
+            CPUID // Read Only
             | GPIO_IN
             | GPIO_HILIN
             | SPINLOCK_ST 

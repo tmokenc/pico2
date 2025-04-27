@@ -1,5 +1,5 @@
 use super::*;
-use crate::clock::{Clock, EventType};
+use crate::clock::EventType;
 use sha2::Digest;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -16,7 +16,9 @@ pub const SUM6: u16 = 0x0020; // 256-bit checksum result. Contents are undefined
 pub const SUM7: u16 = 0x0024; // 256-bit checksum result. Contents are undefined when CSR_SUM_VLD is 0.
 
 // Control and status register bits
+#[allow(dead_code)]
 const CSR_SUM_VLD: u32 = 1 << 2; // Checksum valid
+#[allow(dead_code)]
 const CSR_WDATA_RDY: u32 = 1 << 1; // Write data ready
 const CSR_START: u32 = 1 << 0; // Start checksum calculation
 const CSR_ERR_WDATA_NOT_RDY: u32 = 1 << 4;
