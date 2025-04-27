@@ -1,6 +1,5 @@
+#![allow(non_camel_case_types)]
 use crate::utils::{extract_bit, extract_bits};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 pub enum GpioFunction {
     Input,
