@@ -74,25 +74,34 @@ impl Interrupts {
     pub const POWMAN_IRQ_TIMER: Interrupt = 45;
 
     // Never firing
-    pub const SPAREIRQ_IRQ_0: Interrupt = 46;
-    pub const SPAREIRQ_IRQ_1: Interrupt = 47;
-    pub const SPAREIRQ_IRQ_2: Interrupt = 48;
-    pub const SPAREIRQ_IRQ_3: Interrupt = 49;
-    pub const SPAREIRQ_IRQ_4: Interrupt = 50;
-    pub const SPAREIRQ_IRQ_5: Interrupt = 51;
+    pub const _SPAREIRQ_IRQ_0: Interrupt = 46;
+    pub const _SPAREIRQ_IRQ_1: Interrupt = 47;
+    pub const _SPAREIRQ_IRQ_2: Interrupt = 48;
+    pub const _SPAREIRQ_IRQ_3: Interrupt = 49;
+    pub const _SPAREIRQ_IRQ_4: Interrupt = 50;
+    pub const _SPAREIRQ_IRQ_5: Interrupt = 51;
 
     // Core local interrupts are located from 21th to 29th bits
     const CORE_LOCAL_IRQS_MASK: u64 = 0x1FF << 21;
 
-    pub fn set_irq(&mut self, irq: Interrupt) {
-        *self.global.borrow_mut() |= 1 << irq;
-    }
-
-    pub fn set_core_local_irq(&mut self, core: u8, irq: u8) {
-        if core == 0 {
+    /// Enable the IRQ for the given core
+    pub fn set_irq(&mut self, irq: Interrupt, value: bool) {
+        if value {
             *self.global.borrow_mut() |= 1 << irq;
         } else {
-            *self.core1.borrow_mut() |= 1 << irq;
+            self.clear_irq(irq);
+        }
+    }
+
+    pub fn set_core_local_irq(&mut self, core: u8, irq: Interrupt, value: bool) {
+        if value {
+            if core == 0 {
+                *self.global.borrow_mut() |= 1 << irq;
+            } else {
+                *self.core1.borrow_mut() |= 1 << irq;
+            }
+        } else {
+            self.clear_core_local_irq(core, irq);
         }
     }
 
@@ -136,11 +145,13 @@ mod tests {
         assert!(interrupts.iter(0).next().is_none());
         assert!(interrupts.iter(1).next().is_none());
 
-        interrupts.set_irq(Interrupts::TIMER0_IRQ_0);
+        interrupts.set_irq(Interrupts::TIMER0_IRQ_0, true);
 
         assert_eq!(interrupts.iter(0).next(), Some(Interrupts::TIMER0_IRQ_0));
-
         interrupts.clear_irq(Interrupts::TIMER0_IRQ_0);
+
+        assert!(interrupts.iter(0).next().is_none());
+        interrupts.set_irq(Interrupts::TIMER0_IRQ_1, false);
 
         assert!(interrupts.iter(0).next().is_none());
     }
