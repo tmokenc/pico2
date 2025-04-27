@@ -1,79 +1,72 @@
+use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::time::Duration;
 
+use crate::bus::Bus;
 use crate::common::MHZ;
 
-pub type EventFn = Box<dyn FnOnce()>;
-pub type IntervalFn = Box<dyn Fn()>;
+pub mod event;
 
-pub struct Interval {
-    pub name: String,
-    pub period: Duration,
-    pub last_time: Duration,
-    interval_fn: IntervalFn,
-}
-
-pub struct Event {
-    pub name: String,
-    event_fn: EventFn,
-}
+pub use event::{Event, EventFn, EventType};
 
 #[derive(Default)]
 pub struct Clock {
     pub clk_spd: u64,
-    pub ticks: u64,
-    pub events: BTreeMap<u64, Event>,
+    pub ticks: RefCell<u64>,
+    pub events: RefCell<BTreeMap<u64, Event>>,
 }
 
 impl Clock {
     pub fn new(clk_spd: u64) -> Self {
         Self {
             clk_spd,
-            ticks: 0,
-            events: BTreeMap::new(),
+            ticks: RefCell::new(0),
+            events: RefCell::new(BTreeMap::new()),
         }
     }
 
-    pub fn tick(&mut self) {
-        self.ticks += 1;
+    pub fn tick(&self, bus: &mut Bus) {
+        let ticks = {
+            let mut tmp = self.ticks.borrow_mut();
+            *tmp += 1;
+            *tmp
+        };
+        let mut events = Vec::new();
+        let mut planned_events = self.events.borrow_mut();
 
-        loop {
-            if self
-                .events
-                .first_key_value()
-                .filter(|v| v.0 <= &self.ticks)
-                .is_none()
-            {
-                break;
-            }
+        while planned_events
+            .first_key_value()
+            .filter(|v| v.0 <= &ticks)
+            .is_some()
+        {
+            events.push(planned_events.pop_first().unwrap().1);
+        }
 
-            let (_atime, event) = self.events.pop_first().unwrap();
-            log::info!("Event {} activated at tick {}", event.name, self.ticks);
-            (event.event_fn)();
+        // Avoid deadlock if the event functions tries to schedule another event
+        drop(planned_events);
+
+        for event in events {
+            log::info!("Event {} activated at tick {}", event.typ, ticks);
+            event.exec();
         }
     }
 
     /// Schedule an event to be executed after a certain number of ticks.
     /// Return the activation time of the event.
     /// Combining with the name, it can be used to cancel the event.
-    pub fn schedule<F: FnOnce() + 'static>(&mut self, ticks: u64, name: &str, event_fn: F) -> u64 {
-        let activation_time = self.ticks + ticks;
-        log::info!("Scheduling event {} at tick {}", name, self.ticks + ticks);
-        self.events.insert(
-            activation_time,
-            Event {
-                name: name.to_string(),
-                event_fn: Box::new(event_fn) as EventFn,
-            },
-        );
+    pub fn schedule<F: FnOnce() + 'static>(&self, ticks: u64, typ: EventType, event_fn: F) -> u64 {
+        let activation_time = *self.ticks.borrow() + ticks;
+        log::info!("Scheduling event {} at tick {}", typ, activation_time);
+        self.events
+            .borrow_mut()
+            .insert(activation_time, Event::new(typ, event_fn));
 
         activation_time
     }
 
-    pub fn cancel(&mut self, activation_time: u64, name: &str) {
-        self.events.retain(|&atime, event| {
-            if atime == activation_time && event.name == name {
-                log::info!("Cancelling event {} at tick {}", name, self.ticks);
+    pub fn cancel(&self, typ: EventType) {
+        self.events.borrow_mut().retain(|&atime, event| {
+            if event.typ == typ {
+                log::info!("Cancelling event {} at tick {}", typ, *self.ticks.borrow());
                 false
             } else {
                 true

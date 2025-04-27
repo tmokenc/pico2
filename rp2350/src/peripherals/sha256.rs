@@ -1,5 +1,5 @@
 use super::*;
-use crate::clock::Clock;
+use crate::clock::{Clock, EventType};
 use sha2::Digest;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -142,17 +142,14 @@ impl Peripheral for Rc<RefCell<Sha256>> {
                 drop(inner);
                 let self_clone = Rc::clone(self);
 
-                ctx.clock
-                    .as_ref()
-                    .borrow_mut()
-                    .schedule(57, "TRNG", move || {
-                        let mut inner = self_clone.as_ref().borrow_mut();
-                        let sha_core = core::mem::take(&mut inner.sha_core);
-                        let result = sha_core.finalize();
-                        inner.sum = result.into();
-                        inner.sum_vld = true;
-                        inner.writed_count = 0;
-                    });
+                ctx.clock.schedule(57, EventType::Sha256, move || {
+                    let mut inner = self_clone.as_ref().borrow_mut();
+                    let sha_core = core::mem::take(&mut inner.sha_core);
+                    let result = sha_core.finalize();
+                    inner.sum = result.into();
+                    inner.sum_vld = true;
+                    inner.writed_count = 0;
+                });
             }
             SUM0 | SUM1 | SUM2 | SUM3 | SUM4 | SUM5 | SUM6 | SUM7 => { /* Read Only */ }
             _ => return Err(PeripheralError::OutOfBounds),

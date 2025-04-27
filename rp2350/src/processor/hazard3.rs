@@ -459,6 +459,7 @@ impl Hazard3 {
 mod tests {
     use super::*;
     use crate::bus::Bus;
+    use crate::inspector::*;
     use crate::processor::ProcessorContext;
 
     const SRAM: u32 = 0x2000_0000;
@@ -473,6 +474,7 @@ mod tests {
             let mut $ctx = ProcessorContext {
                 bus: &mut bus,
                 wake_opposite_core: false,
+                inspector: std::rc::Rc::new(DummyInspector) as Rc<dyn Inspector>,
             };
         };
     }
