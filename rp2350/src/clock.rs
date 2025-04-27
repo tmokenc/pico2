@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use crate::bus::Bus;
 use crate::common::MHZ;
@@ -7,6 +8,24 @@ use crate::common::MHZ;
 pub mod event;
 
 pub use event::{Event, EventFn, EventType};
+
+pub trait IntoTicks {
+    fn into_tick(self) -> u64;
+}
+
+impl IntoTicks for u64 {
+    fn into_tick(self) -> u64 {
+        self
+    }
+}
+
+impl IntoTicks for Duration {
+    fn into_tick(self) -> u64 {
+        let base = 1.0 / (150 * MHZ) as f64;
+        let base = Duration::from_secs_f64(base);
+        self.div_duration_f64(base).ceil() as u64
+    }
+}
 
 #[derive(Default)]
 pub struct Clock {
@@ -53,7 +72,13 @@ impl Clock {
     /// Schedule an event to be executed after a certain number of ticks.
     /// Return the activation time of the event.
     /// Combining with the name, it can be used to cancel the event.
-    pub fn schedule<F: FnOnce() + 'static>(&self, ticks: u64, typ: EventType, event_fn: F) -> u64 {
+    pub fn schedule<T: IntoTicks, F: FnOnce() + 'static>(
+        &self,
+        ticks: T,
+        typ: EventType,
+        event_fn: F,
+    ) -> u64 {
+        let ticks = ticks.into_tick();
         let activation_time = *self.ticks.borrow() + ticks;
         log::info!("Scheduling event {} at tick {}", typ, activation_time);
         self.events
@@ -61,6 +86,13 @@ impl Clock {
             .insert(activation_time, Event::new(typ, event_fn));
 
         activation_time
+    }
+
+    pub fn is_scheduled(&self, typ: EventType) -> bool {
+        self.events
+            .borrow()
+            .iter()
+            .any(|(_, event)| event.typ == typ)
     }
 
     pub fn cancel(&self, typ: EventType) {

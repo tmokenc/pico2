@@ -248,6 +248,12 @@ impl GpioController {
     pub fn select(&mut self, func: FunctionSelect) -> Option<&mut GpioPin> {
         self.pins.iter_mut().find(|v| v.func_sel() == func)
     }
+
+    pub fn set_by_func_sel(&mut self, func: FunctionSelect, value: impl Into<GpioPinValue>) {
+        if let Some(pin) = self.select(func) {
+            pin.value = value.into();
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone)]
