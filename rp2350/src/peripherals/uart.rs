@@ -1,4 +1,4 @@
-//! TODO 
+//! TODO
 //! DMA support
 //! Interrupt: UARTINTR and UARTRTINTR
 //! Unsure what they do when reading the datasheet
@@ -10,11 +10,11 @@ use crate::utils::{extract_bit, extract_bits, w1c, Fifo};
 use std::cell::RefCell;
 use std::time::Duration;
 
-mod transmit;
 mod receive;
+mod transmit;
 
-use transmit::*;
 use receive::*;
+use transmit::*;
 
 pub const UARTDR: u16 = 0x000; // Data Register, UARTDR
 pub const UARTRSR: u16 = 0x004; // Receive Status Register/Error Clear Register, UARTRSR/UARTECR
@@ -40,7 +40,6 @@ pub const UARTPCELLID2: u16 = 0xFF8; // UARTPCellID2 Register
 pub const UARTPCELLID3: u16 = 0xFFC; // UARTPCellID3 Register
 
 const FIFO_DEPTH: usize = 32;
-
 
 const FRAME_ERROR: u8 = 0x1 << 0;
 const PARITY_ERROR: u8 = 0x1 << 1;
@@ -157,7 +156,7 @@ impl<const IDX: usize> Uart<IDX> {
             0b010 => (FIFO_DEPTH as u8 / 2) * 1,
             0b011 => (FIFO_DEPTH as u8 / 4) * 3,
             0b100 => (FIFO_DEPTH as u8 / 8) * 7,
-            _ => (FIFO_DEPTH as u8 / 2) * 1 // reserved, but use the default value here
+            _ => (FIFO_DEPTH as u8 / 2) * 1, // reserved, but use the default value here
         }
     }
 
@@ -307,20 +306,12 @@ impl<const IDX: usize> Peripheral for Rc<RefCell<Uart<IDX>>> {
 
         let value = match address {
             UARTDR => {
-                // TODO
                 let value = match uart.rx_fifo.pop() {
                     Some(value) => value as u32,
                     None => 0,
                 };
 
-                uart.flags &= !FLAG_RXFF;
-
-                if uart.rx_fifo.is_empty() {
-                    uart.flags |= FLAG_RXFE;
-                } else {
-                    uart.flags &= !FLAG_RXFE;
-                }
-
+                uart.check_rx_fifo();
                 uart.update_interrupt(ctx.interrupts.clone());
 
                 value as u32
@@ -340,7 +331,6 @@ impl<const IDX: usize> Peripheral for Rc<RefCell<Uart<IDX>>> {
             UARTICR | UARTRIS => uart.interrupt_status as u32,
             UARTMIS => (uart.interrupt_status & uart.interrupt_mask) as u32,
 
-
             UARTDMACR => uart.dma_ctrl as u32,
 
             UARTPERIPHID0 => 0x11,
@@ -352,8 +342,7 @@ impl<const IDX: usize> Peripheral for Rc<RefCell<Uart<IDX>>> {
             UARTPCELLID2 => 0x05,
             UARTPCELLID3 => 0xB1,
 
-
-            UARTILPR  => 0, // TODO
+            UARTILPR => 0, // TODO
 
             _ => return Err(PeripheralError::OutOfBounds),
         };
@@ -369,13 +358,21 @@ impl<const IDX: usize> Peripheral for Rc<RefCell<Uart<IDX>>> {
     ) -> PeripheralResult<()> {
         let mut uart = self.borrow_mut();
         match address {
-            UARTRSR  // TODO
-            | UARTFR
-            | UARTILPR 
-            | UARTIFLS => (), // TODO
+            UARTILPR => (), // TODO
+            UARTIFLS => {
+                uart.fifo_level_select = value as u8 & 0b11_1111;
+                uart.update_interrupt(ctx.interrupts.clone());
+            }
+
+            UARTRSR => {
+                let mut error = uart.error as u32;
+                w1c(&mut error, value, 0b1111);
+                uart.error = error as u8;
+                uart.update_interrupt(ctx.interrupts.clone());
+            }
 
             UARTDR => {
-                // TODO not sure if the data should be added to FIFO while the UART is disabled 
+                // TODO not sure if the data should be added to FIFO while the UART is disabled
                 // or transmit is disabled
                 if uart.is_fifo_enabled() {
                     let _ = uart.tx_fifo.push(value as u8); // if the FIFO is full, the value will be dropped
@@ -384,13 +381,13 @@ impl<const IDX: usize> Peripheral for Rc<RefCell<Uart<IDX>>> {
                 }
 
                 uart.check_tx_fifo();
-                
+
                 if uart.is_enabled() && uart.is_transmit_enabled() {
                     drop(uart);
                     start_transmitting(self.clone(), ctx);
                 }
             }
-                              
+
             UARTCR => {
                 uart.ctrl = value as u16;
 
@@ -403,13 +400,12 @@ impl<const IDX: usize> Peripheral for Rc<RefCell<Uart<IDX>>> {
                     if is_transmit_enabled {
                         start_transmitting(self.clone(), ctx);
                     }
-                    
+
                     if is_receive_enabled {
                         start_receiving(self.clone(), ctx);
                     } else {
                         abort_receiving(self.clone(), ctx);
                     }
-
                 }
             }
             UARTLCR_H => uart.line_ctrl = value as u8,
@@ -430,11 +426,9 @@ impl<const IDX: usize> Peripheral for Rc<RefCell<Uart<IDX>>> {
             UARTIBRD => uart.update_baudrate(value as u16, None),
             UARTFBRD => uart.update_baudrate(None, value as u8),
 
-            UARTRIS | UARTMIS 
-            | UARTPERIPHID0 | UARTPERIPHID1 | UARTPERIPHID2 | UARTPERIPHID3 | UARTPCELLID0
-            | UARTPCELLID1 | UARTPCELLID2 | UARTPCELLID3 => (), // Ignore writes to read-only
-                                                               // registers
-
+            UARTRIS | UARTMIS | UARTFR | UARTPERIPHID0 | UARTPERIPHID1 | UARTPERIPHID2
+            | UARTPERIPHID3 | UARTPCELLID0 | UARTPCELLID1 | UARTPCELLID2 | UARTPCELLID3 => (), // Ignore writes to read-only
+            // registers
             _ => return Err(PeripheralError::OutOfBounds),
         }
 
@@ -461,4 +455,3 @@ pub(self) fn get_odd_parity(value: u8, word_len: u8) -> u8 {
 
     parity
 }
-
