@@ -25,6 +25,18 @@ impl<const N: usize> Default for GenericMemory<N> {
     }
 }
 
+impl<const N: usize> AsRef<[u8]> for GenericMemory<N> {
+    fn as_ref(&self) -> &[u8] {
+        &self.data
+    }
+}
+
+impl<const N: usize> AsMut<[u8]> for GenericMemory<N> {
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut self.data
+    }
+}
+
 impl<const N: usize> GenericMemory<N> {
     pub fn new(data: &[u8]) -> Self {
         assert!(data.len() <= N);
