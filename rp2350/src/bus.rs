@@ -50,6 +50,19 @@ pub enum LoadStatus {
     Error(BusError),
 }
 
+impl LoadStatus {
+    pub fn value(&self) -> Option<u32> {
+        match self {
+            LoadStatus::Done(v) | LoadStatus::ExclusiveDone(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn is_done(&self) -> bool {
+        self.value().is_some()
+    }
+}
+
 /// Status of a store transaction
 /// this will be wrapped in a RC<RefCell<>> to allow for mutable access to the status
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +72,12 @@ pub enum StoreStatus {
     Done,
     ExclusiveDone, // exclusive access
     Error(BusError),
+}
+
+impl StoreStatus {
+    pub fn is_done(&self) -> bool {
+        matches!(self, StoreStatus::Done | StoreStatus::ExclusiveDone)
+    }
 }
 
 enum StatusType {
@@ -124,7 +143,7 @@ impl Bus {
     pub fn new(
         gpio: Rc<RefCell<GpioController>>,
         interrupts: Rc<RefCell<Interrupts>>,
-        clock: Rc<RefCell<Clock>>,
+        clock: Rc<Clock>,
     ) -> Self {
         Self {
             peripherals: Peripherals::new(gpio, interrupts, clock),
@@ -489,7 +508,7 @@ mod tests {
             let mut $bus = Bus::new(
                 Rc::new(RefCell::new(GpioController::default())),
                 Rc::new(RefCell::new(Interrupts::default())),
-                Rc::new(RefCell::new(Clock::new(150_000_000))),
+                Rc::new(Clock::new(150_000_000)),
             );
         };
     }
