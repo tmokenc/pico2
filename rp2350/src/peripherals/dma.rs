@@ -1,153 +1,313 @@
-use crate::clock::*;
-use crate::interrupts::Interrupts;
-use crate::utils::{clear_bit, set_bit, set_bit_state};
-use std::cell::RefCell;
-use std::rc::Rc;
+use self::channel::TransferMode;
 
 use super::*;
+use crate::bus::{Bus, BusAccessContext, LoadStatus, StoreStatus};
+use crate::clock::EventType;
+use crate::interrupts::{Interrupt, Interrupts};
+use crate::utils::{clear_bits, w1c, Fifo};
+use std::cell::RefCell;
+use std::ops::DerefMut;
+use std::rc::Rc;
 
-use crate::common::{DataSize, Requestor};
+mod channel;
+mod timer;
 
-#[derive(Clone, Copy, Debug)]
-pub struct Timer {
-    pub x: u16,
-    pub y: u16,
-}
+use channel::{Channel, TreqSel};
+use timer::Timer;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TreqSel {
-    Timer0,
-    Timer1,
-    Timer2,
-    Timer3,
-    Permanent,
-    Dreg(u32),
-}
+const NOF_CHANNEL: usize = 16;
 
-#[derive(Default, Clone, Copy)]
-pub struct Channel {
-    pub read_addr: u32,
-    pub write_addr: u32,
-    pub transfer_count: u32,
-    pub ctrl: u32,
-}
+// Channel 0 at offset 0, up to 0x3fc for channel 15
+pub const CHN_READ_ADDR: u16 = 0x000;
+pub const CHN_WRITE_ADDR: u16 = 0x004;
+pub const CHN_TRANSFER_COUNT: u16 = 0x008;
+pub const CHN_CTRL_TRIG: u16 = 0x00C;
+pub const CHN_AL1_CTRL: u16 = 0x010;
+pub const CHN_AL1_READ_ADDR: u16 = 0x014;
+pub const CHN_AL1_WRITE_ADDR: u16 = 0x018;
+pub const CHN_AL1_TRANSFER_COUNT_TRIG: u16 = 0x01C;
+pub const CHN_AL2_CTRL: u16 = 0x020;
+pub const CHN_AL2_TRANS_COUNT: u16 = 0x24;
+pub const CHN_AL2_READ_ADDR: u16 = 0x28;
+pub const CHN_AL2_WRITE_ADDR_TRIG: u16 = 0x2c;
+pub const CHN_AL3_CTRL: u16 = 0x030;
+pub const CHN_AL3_WRITE_ADDR: u16 = 0x034;
+pub const CHN_AL3_TRANS_COUNT: u16 = 0x038;
+pub const CHN_AL3_READ_ADDR_TRIG: u16 = 0x03c;
 
-impl Channel {
-    fn is_enabled(&self) -> bool {
-        (self.ctrl & 0x1) != 0
-    }
+pub const INTR: u16 = 0x400;
 
-    fn high_priority(&self) -> bool {
-        (self.ctrl & 1 << 1) != 0
-    }
+// 4 interrupt channels, the N at the last is the index
+pub const INTEN: u16 = 0x404;
+pub const INTFN: u16 = 0x408;
+pub const INTSN: u16 = 0x40c;
 
-    fn datasize(&self) -> DataSize {
-        match (self.ctrl >> 2) & 0b11 {
-            0 => DataSize::Byte,
-            1 => DataSize::HalfWord,
-            _ => DataSize::Word,
-        }
-    }
+pub const TIMERN: u16 = 0x440;
 
-    fn inc_read(&self) -> bool {
-        (self.ctrl & 1 << 4) != 0
-    }
+pub const MULTI_CHAN_TRIGGER: u16 = 0x450;
+pub const SNIFF_CTRL: u16 = 0x454;
+pub const SNIFF_DATA: u16 = 0x458;
+pub const FIFO_LEVELS: u16 = 0x460;
+pub const CHAN_ABORT: u16 = 0x454;
+pub const N_CHANNELS: u16 = 0x468;
 
-    fn inc_read_rev(&self) -> bool {
-        (self.ctrl & 1 << 5) != 0
-    }
+// 16 channels
+pub const SECCFG_CHN: u16 = 0x480;
 
-    fn inc_write(&self) -> bool {
-        (self.ctrl & 1 << 6) != 0
-    }
+// 4 interrupt channels
+pub const SECCFG_IRQN: u16 = 0x4c0;
 
-    fn inc_write_rev(&self) -> bool {
-        (self.ctrl & 1 << 7) != 0
-    }
+pub const SECCFG_MISC: u16 = 0x4d0;
 
-    fn ring_size(&self) -> u32 {
-        (self.ctrl >> 8) & 0b1111
-    }
+pub const MPU_CTRL: u16 = 0x500;
 
-    fn ring_sel(&self) -> bool {
-        (self.ctrl & 1 << 12) != 0
-    }
+// 8 regions
+pub const MPU_BARN: u16 = 0x504;
+pub const MPU_LARN: u16 = 0x508;
 
-    fn chain_to(&self) -> u32 {
-        (self.ctrl >> 13) & 0b1111
-    }
+// 16 channels
+pub const CHN_DBG_CTDREQ: u16 = 0x800;
+pub const CHN_DBG_TCR: u16 = 0x804;
 
-    fn treq_sel(&self) -> TreqSel {
-        match (self.ctrl >> 17) & 0b111111 {
-            0x3b => TreqSel::Timer0,
-            0x3c => TreqSel::Timer1,
-            0x3d => TreqSel::Timer2,
-            0x3e => TreqSel::Timer3,
-            0x3f => TreqSel::Permanent,
-            v => TreqSel::Dreg(v),
-        }
-    }
+// Offset between each register
+pub const CHANNEL_REGISTER_OFFSET: u16 = 0x040;
+pub const INT_REGISTER_OFFSET: u16 = 0x010;
+pub const SECCFG_REGISTER_OFFSET: u16 = 0x004;
+pub const MPU_REGISTER_OFFSET: u16 = 0x008;
+pub const TIMER_REGISTER_OFFSET: u16 = 0x004;
 
-    fn irq_quiet(&self) -> bool {
-        (self.ctrl & 1 << 23) != 0
-    }
-
-    fn bswap(&self) -> bool {
-        (self.ctrl & 1 << 24) != 0
-    }
-
-    fn sniff_en(&self) -> bool {
-        (self.ctrl & 1 << 25) != 0
-    }
-
-    fn busy(&self) -> bool {
-        (self.ctrl & 1 << 26) != 0
-    }
-
-    fn set_busy(&mut self, busy: bool) {
-        set_bit_state(&mut self.ctrl, 26, busy);
-    }
-
-    fn write_err(&self) -> bool {
-        (self.ctrl & 1 << 29) != 0
-    }
-
-    fn read_err(&self) -> bool {
-        (self.ctrl & 1 << 30) != 0
-    }
-
-    fn ahb_err(&self) -> bool {
-        // should be a logical or
-        (self.ctrl & 1 << 31) != 0
-    }
+#[derive(Default, Clone)]
+pub struct FifoValue {
+    pub value: Rc<RefCell<LoadStatus>>,
+    pub channel: usize,
 }
 
 pub struct Dma {
-    pub channels: [Channel; 8],
+    pub channels: [Channel; NOF_CHANNEL],
     pub timers: [Timer; 4],
     pub dreg: [bool; 54],
+    pub interrupt_raw: u16,
+    pub interrupt_enable: [u16; 4],
+    pub interrupt_force: [u16; 4],
+    pub interrupt_secure: [u8; 4],
+    pub seccfg: u16,
+    pub fifo: Fifo<FifoValue, NOF_CHANNEL>,
+    pub channel_round_robin: Fifo<usize, NOF_CHANNEL>,
+    current_read: Option<Rc<RefCell<LoadStatus>>>,
+    current_write: Option<Rc<RefCell<StoreStatus>>>,
 }
 
 impl Default for Dma {
     fn default() -> Self {
         Self {
-            channels: [Channel::default(); 8],
-            timers: [Timer { x: 0, y: 0 }; 4],
+            channels: [
+                // no copy, cannot do the [Channel::default; 16]...
+                Channel::default(),
+                Channel::default(),
+                Channel::default(),
+                Channel::default(),
+                Channel::default(),
+                Channel::default(),
+                Channel::default(),
+                Channel::default(),
+                Channel::default(),
+                Channel::default(),
+                Channel::default(),
+                Channel::default(),
+                Channel::default(),
+                Channel::default(),
+                Channel::default(),
+                Channel::default(),
+            ],
+            timers: [Timer::default(); 4],
             dreg: [false; 54],
+            interrupt_raw: 0,
+            interrupt_enable: [0; 4],
+            interrupt_force: [0; 4],
+            interrupt_secure: [0; 4],
+            seccfg: 0,
+            fifo: Fifo::default(),
+            current_read: None,
+            current_write: None,
+            channel_round_robin: Fifo::default(),
         }
     }
 }
 
 impl Dma {
     pub fn new() -> Self {
-        Default::default()
+        Self {
+            ..Default::default()
+        }
     }
 
-    pub fn tick(&mut self) {
-        todo!()
+    pub fn tick(&mut self, bus: &mut Bus) {
+        // no active channels
+        if self.channel_round_robin.is_empty() {
+            return;
+        }
+
+        self.read(bus);
+        self.write(bus);
     }
 
-    fn start_channel(&mut self, channel_idx: usize) {
+    fn read(&mut self, bus: &mut Bus) {
+        if self
+            .current_read
+            .as_ref()
+            .filter(|v| v.borrow().is_done())
+            .is_none()
+        {
+            return;
+        }
+
+        self.current_read = None;
+
+        let mut channel_idx = None;
+        for _ in 0..self.fifo.len() {
+            let Some(idx) = self.channel_round_robin.pop() else {
+                return;
+            };
+
+            if self.channels[idx].is_enabled() && self.channels[idx].busy() {
+                self.channel_round_robin.push(idx);
+
+                if *self.channels[idx].ready_to_transfer.borrow() {
+                    channel_idx = Some(idx);
+                    break;
+                }
+            }
+        }
+
+        let Some(channel_idx) = channel_idx else {
+            return;
+        };
+
+        let ref mut channel = self.channels[channel_idx];
+
+        if channel.transfer_count == 0 {
+            return;
+        }
+
+        let load_status = bus.load(
+            channel.read_addr,
+            BusAccessContext {
+                secure: channel.secure != 0,
+                requestor: Requestor::DmaR,
+                size: channel.datasize(),
+                signed: false,
+                exclusive: false,
+                architecture: ArchitectureType::Hazard3,
+            },
+        );
+
+        match load_status {
+            Ok(status) => {
+                self.fifo.push(FifoValue {
+                    value: Rc::clone(&status),
+                    channel: channel_idx,
+                });
+
+                self.current_read = Some(status);
+                channel.update_read_address();
+            }
+
+            Err(why) => {
+                // TODO
+            }
+        }
+    }
+
+    fn write(&mut self, bus: &mut Bus) {
+        if self
+            .current_write
+            .as_ref()
+            .filter(|v| v.borrow().is_done())
+            .is_none()
+        {
+            return;
+        }
+
+        self.current_write = None;
+
+        let Some(fifo_value) = self.fifo.pop() else {
+            return;
+        };
+
+        let ref mut channel = self.channels[fifo_value.channel];
+
+        if !channel.is_enabled() || !channel.busy() {
+            return;
+        }
+
+        let data_size = channel.datasize();
+        let Some(mut value) = fifo_value.value.borrow_mut().value() else {
+            return;
+        };
+
+        if channel.bswap() {
+            match data_size {
+                DataSize::Byte => {}
+                DataSize::HalfWord => {
+                    let tmp = value as u16;
+                    value = tmp.swap_bytes() as u32;
+                }
+                DataSize::Word => value = value.swap_bytes(),
+            }
+        }
+
+        let store_status = bus.store(
+            channel.write_addr,
+            value,
+            BusAccessContext {
+                secure: channel.secure != 0,
+                requestor: Requestor::DmaW,
+                size: channel.datasize(),
+                signed: false,
+                exclusive: false,
+                architecture: ArchitectureType::Hazard3,
+            },
+        );
+
+        match store_status {
+            Ok(status) => {
+                self.current_write = Some(status);
+                channel.update_write_address();
+
+                if channel.transfer_mode() == TransferMode::Endless {
+                    return;
+                }
+
+                if channel.transfer_count == 0 {
+                    channel.set_busy(false);
+                    let chain_to = channel.chain_to() as usize;
+                    let clock = Rc::clone(&bus.peripherals.clock);
+                    let transfer_mode = channel.transfer_mode();
+
+                    if !channel.irq_quiet() {
+                        self.interrupt_raw |= 1 << fifo_value.channel;
+                        self.update_irq(bus.peripherals.interrupts.borrow_mut().deref_mut());
+                    }
+
+                    if chain_to != fifo_value.channel {
+                        self.start_channel(chain_to, Rc::clone(&clock));
+                    }
+
+                    if transfer_mode == TransferMode::TriggerSelf {
+                        self.start_channel(fifo_value.channel, clock);
+                    }
+                } else {
+                    self.schedule_transfer(fifo_value.channel, Rc::clone(&bus.peripherals.clock));
+                }
+            }
+
+            Err(why) => {
+                // TODO
+            }
+        }
+    }
+
+    fn start_channel(&mut self, channel_idx: usize, clock: Rc<Clock>) {
         let ref mut channel = self.channels[channel_idx];
 
         if !channel.is_enabled() || channel.busy() {
@@ -155,38 +315,53 @@ impl Dma {
         }
 
         channel.set_busy(true);
+        channel.transfer_count = channel.transfer_counter_reload;
+        self.channel_round_robin.push(channel_idx);
 
         if channel.transfer_count > 0 {
-            self.schedule_transfer(channel_idx);
+            self.schedule_transfer(channel_idx, Rc::clone(&clock));
         }
     }
 
-    fn schedule_transfer(&mut self, channel_idx: usize) {
-        let ref mut channel = self.channels[channel_idx];
+    fn abort_channel(&mut self, channel_idx: usize) {
+        self.channels[channel_idx].set_busy(false);
+    }
 
+    fn schedule_transfer(&mut self, channel_idx: usize, clock: Rc<Clock>) {
+        let treq = self.channels[channel_idx].treq_sel();
         let mut delay = 0;
-        let treq = channel.treq_sel();
 
         if !self.has_dreg(treq) && treq != TreqSel::Permanent {
             delay = self.get_timer(treq);
+
+            if delay == 0 {
+                return;
+            }
         }
 
-        // self.clock
-        //     .schedule(delay, "DMA transfer".to_string(), move |clock| {
-        //         let mut channel = &mut clock.channels[channel_idx];
+        let ready_trigger = Rc::clone(&self.channels[channel_idx].ready_to_transfer);
+        *ready_trigger.borrow_mut() = false;
 
-        //         if channel.is_enabled() && channel.busy() {
-        //             // perform the transfer
-        //             self.perform_transfer(channel);
-        //         }
+        clock.schedule(delay, EventType::DmaChannelTimer(channel_idx), move || {
+            *ready_trigger.borrow_mut() = true;
+        });
+    }
 
-        //         if channel.transfer_count == 0 {
-        //             channel.set_busy(false);
-        //             self.interrupts.borrow_mut().set_irq(Requestor::Dma, true);
-        //         }
-        //     });
+    pub(crate) fn set_dreg(&mut self, dreg_channel: usize, clock: Rc<Clock>) {
+        if self.dreg[dreg_channel] {
+            return;
+        }
 
-        todo!()
+        self.dreg[dreg_channel] = true;
+
+        for i in 0..NOF_CHANNEL {
+            let ref mut channel = self.channels[i];
+            if channel.treq_sel() == TreqSel::Dreg(dreg_channel as u32) {
+                if channel.is_enabled() && channel.busy() {
+                    self.schedule_transfer(i, Rc::clone(&clock));
+                }
+            }
+        }
     }
 
     fn has_dreg(&self, treq_sel: TreqSel) -> bool {
@@ -198,29 +373,111 @@ impl Dma {
     }
 
     fn get_timer(&mut self, treq_sel: TreqSel) -> u64 {
-        let ref timer = match treq_sel {
-            TreqSel::Timer0 => self.timers[0],
-            TreqSel::Timer1 => self.timers[1],
-            TreqSel::Timer2 => self.timers[2],
-            TreqSel::Timer3 => self.timers[3],
-            TreqSel::Permanent => return 0,
-            _ => return 0,
-        };
-
-        if timer.y == 0 {
-            return 0;
+        match treq_sel {
+            TreqSel::Timer0 => self.timers[0].ticks(),
+            TreqSel::Timer1 => self.timers[1].ticks(),
+            TreqSel::Timer2 => self.timers[2].ticks(),
+            TreqSel::Timer3 => self.timers[3].ticks(),
+            TreqSel::Permanent => 0,
+            _ => 0,
         }
+    }
 
-        let x = timer.x as u64;
-        let y = timer.y as u64;
+    fn timer_has_access(&self, timer_index: usize) -> bool {
+        ((self.seccfg >> (2 + timer_index * 2)) & 0b11) != 0
+    }
 
-        ((x / y) * MHZ) / (150 * MHZ)
+    fn irq_status(&self, idx: usize) -> u16 {
+        (self.interrupt_enable[idx] & self.interrupt_raw) | self.interrupt_force[idx]
+    }
+
+    fn update_irq(&self, interrupts: &mut Interrupts) {
+        const IRQS: [Interrupt; 4] = [
+            Interrupts::DMA_IRQ_0,
+            Interrupts::DMA_IRQ_1,
+            Interrupts::DMA_IRQ_2,
+            Interrupts::DMA_IRQ_3,
+        ];
+
+        for i in 0..4 {
+            let irq = self.irq_status(i);
+            interrupts.set_irq(IRQS[i], irq != 0);
+        }
     }
 }
 
-impl Peripheral for Dma {
+impl Peripheral for Rc<RefCell<Dma>> {
     fn read(&self, addr: u16, ctx: &PeripheralAccessContext) -> PeripheralResult<u32> {
-        todo!()
+        let dma = self.borrow();
+
+        let value = match parse_offset(addr) {
+            DmaOffset::Channel { index, offset } => {
+                let ref channel = dma.channels[index];
+
+                match offset {
+                    CHN_READ_ADDR
+                    | CHN_AL1_READ_ADDR
+                    | CHN_AL2_READ_ADDR
+                    | CHN_AL3_READ_ADDR_TRIG => channel.read_addr,
+
+                    CHN_WRITE_ADDR
+                    | CHN_AL1_WRITE_ADDR
+                    | CHN_AL2_WRITE_ADDR_TRIG
+                    | CHN_AL3_WRITE_ADDR => channel.write_addr,
+
+                    CHN_TRANSFER_COUNT
+                    | CHN_AL1_TRANSFER_COUNT_TRIG
+                    | CHN_AL2_TRANS_COUNT
+                    | CHN_AL3_TRANS_COUNT => channel.transfer_count,
+
+                    CHN_CTRL_TRIG | CHN_AL1_CTRL | CHN_AL2_CTRL | CHN_AL3_CTRL => channel.ctrl,
+
+                    SECCFG_CHN => channel.secure as u32,
+
+                    CHN_DBG_CTDREQ => channel.dreq_counter,
+                    CHN_DBG_TCR => channel.transfer_counter_reload,
+
+                    _ => return Err(PeripheralError::OutOfBounds),
+                }
+            }
+
+            DmaOffset::Interrupt { index, offset } => match offset {
+                INTEN => dma.interrupt_enable[index] as u32,
+                INTFN => dma.interrupt_force[index] as u32,
+                INTSN => dma.irq_status(index) as u32,
+                SECCFG_IRQN => dma.interrupt_secure[index] as u32,
+                _ => return Err(PeripheralError::OutOfBounds),
+            },
+
+            DmaOffset::Timer { index } => {
+                if !ctx.secure && dma.timer_has_access(index) {
+                    return Err(PeripheralError::OutOfBounds);
+                }
+
+                let timer = dma.timers[index];
+                timer.into()
+            }
+
+            DmaOffset::Mpu { .. } => {
+                /* TODO */
+                0
+            }
+
+            DmaOffset::Default => match addr {
+                INTR => dma.interrupt_raw as u32,
+                MULTI_CHAN_TRIGGER => 0,
+                SNIFF_CTRL => 0, // not implemented
+                SNIFF_DATA => 0,
+                FIFO_LEVELS => 0, // TODO
+                CHAN_ABORT => 0,
+                N_CHANNELS => NOF_CHANNEL as u32,
+                SECCFG_MISC => dma.seccfg as u32,
+                MPU_CTRL => 0, // TODO
+                _ => return Err(PeripheralError::OutOfBounds),
+            },
+        };
+
+        Ok(value)
     }
 
     fn write_raw(
@@ -229,6 +486,187 @@ impl Peripheral for Dma {
         value: u32,
         ctx: &PeripheralAccessContext,
     ) -> PeripheralResult<()> {
-        todo!()
+        let mut dma = self.borrow_mut();
+
+        match parse_offset(addr) {
+            DmaOffset::Channel { index, offset } => {
+                let ref mut channel = dma.channels[index];
+
+                match offset {
+                    CHN_READ_ADDR
+                    | CHN_AL1_READ_ADDR
+                    | CHN_AL2_READ_ADDR
+                    | CHN_AL3_READ_ADDR_TRIG => channel.read_addr = value,
+
+                    CHN_WRITE_ADDR
+                    | CHN_AL1_WRITE_ADDR
+                    | CHN_AL2_WRITE_ADDR_TRIG
+                    | CHN_AL3_WRITE_ADDR => channel.write_addr = value,
+
+                    CHN_TRANSFER_COUNT
+                    | CHN_AL1_TRANSFER_COUNT_TRIG
+                    | CHN_AL2_TRANS_COUNT
+                    | CHN_AL3_TRANS_COUNT => {
+                        if !matches!(value >> 28, 0x0 | 0x1 | 0xf) {
+                            return Err(PeripheralError::Reserved);
+                        }
+
+                        channel.transfer_counter_reload = value;
+                    }
+
+                    CHN_CTRL_TRIG  // dont fmt it
+                    | CHN_AL1_CTRL
+                    | CHN_AL2_CTRL
+                    | CHN_AL3_CTRL => {
+                        let ref mut ctrl = channel.ctrl;
+                        w1c(ctrl, value, 0b11 << 29);
+
+                        let rw_mask = 0b111111 << 26;
+                        clear_bits(ctrl, !rw_mask);
+                        *ctrl |= value & rw_mask;
+
+                        if channel.is_enabled(){
+                            if channel.busy() {
+                                dma.schedule_transfer(index, Rc::clone(&ctx.clock));
+                            }
+                        } else {
+                            channel.set_busy(false);
+                            // TODO
+                        }
+                    }
+
+                    SECCFG_CHN => channel.secure = (value & 0b111) as u8,
+
+                    CHN_DBG_CTDREQ => channel.dreq_counter = 0,
+                    CHN_DBG_TCR => { /* Read Only */ }
+
+                    _ => return Err(PeripheralError::OutOfBounds),
+                }
+
+                if matches!(
+                    offset,
+                    CHN_CTRL_TRIG
+                        | CHN_AL1_TRANSFER_COUNT_TRIG
+                        | CHN_AL2_WRITE_ADDR_TRIG
+                        | CHN_AL3_READ_ADDR_TRIG
+                ) {
+                    if value > 0 {
+                        dma.start_channel(index, Rc::clone(&ctx.clock));
+                    } else {
+                        // Null trigger
+                        dma.interrupt_raw |= 1 << index;
+                        dma.update_irq(ctx.interrupts.borrow_mut().deref_mut());
+                    }
+                }
+            }
+
+            DmaOffset::Interrupt { index, offset } => {
+                match offset {
+                    INTEN => dma.interrupt_enable[index] = value as u16,
+                    INTFN => dma.interrupt_force[index] = value as u16,
+                    INTSN => {
+                        let mut int = dma.interrupt_raw as u32;
+                        w1c(&mut int, value, 0xFFFF);
+                        dma.interrupt_raw = int as u16;
+                    }
+
+                    SECCFG_IRQN => dma.interrupt_secure[index] = (value & 0b11) as u8,
+                    _ => return Err(PeripheralError::OutOfBounds),
+                }
+
+                let mut irq = ctx.interrupts.borrow_mut();
+                dma.update_irq(irq.deref_mut());
+            }
+
+            DmaOffset::Timer { index } => {
+                if !ctx.secure && dma.timer_has_access(index) {
+                    return Err(PeripheralError::OutOfBounds);
+                }
+
+                dma.timers[index] = value.into();
+            }
+
+            DmaOffset::Mpu { .. } => { /* TODO */ }
+
+            DmaOffset::Default => match addr {
+                INTR => {
+                    dma.interrupt_raw = value as u16; // TODO
+                    let mut irq = ctx.interrupts.borrow_mut();
+                    dma.update_irq(irq.deref_mut());
+                }
+                MULTI_CHAN_TRIGGER => {
+                    for index in 0..NOF_CHANNEL {
+                        if (value & (1 << index)) != 0 {
+                            dma.start_channel(index, Rc::clone(&ctx.clock));
+                        }
+                    }
+                }
+                SNIFF_CTRL | SNIFF_DATA => { /* Not implemented */ }
+                FIFO_LEVELS => { /* read only */ }
+                CHAN_ABORT => {
+                    for index in 0..NOF_CHANNEL {
+                        if (value & (1 << index)) != 0 {
+                            dma.abort_channel(index);
+                        }
+                    }
+                }
+                N_CHANNELS => { /* Read only */ }
+                SECCFG_MISC => dma.seccfg = (value & 0b1_1111_1111) as u16,
+                MPU_CTRL => {} // TODO
+                _ => return Err(PeripheralError::OutOfBounds),
+            },
+        }
+
+        Ok(())
+    }
+}
+
+// A helper enum to parse the offset
+enum DmaOffset {
+    Channel { index: usize, offset: u16 },
+    Interrupt { index: usize, offset: u16 },
+    Timer { index: usize },
+    Mpu { index: usize, offset: u16 },
+    Default,
+}
+
+// Return the channel index and the base offset to be read
+fn parse_offset(offset: u16) -> DmaOffset {
+    match offset {
+        CHN_READ_ADDR..=0x3fc => DmaOffset::Channel {
+            index: (offset / CHANNEL_REGISTER_OFFSET) as usize,
+            offset: offset & 0b11111,
+        },
+
+        CHN_DBG_CTDREQ..=0xbc4 => DmaOffset::Channel {
+            index: ((offset - CHN_DBG_CTDREQ) / CHANNEL_REGISTER_OFFSET) as usize,
+            offset: (offset & 0b11111) + CHN_DBG_CTDREQ,
+        },
+
+        INTEN..=0x43c => DmaOffset::Interrupt {
+            index: ((offset - INTEN) / INT_REGISTER_OFFSET) as usize,
+            offset: (offset & 0b111) + INTEN,
+        },
+
+        TIMERN..=0x44c => DmaOffset::Timer {
+            index: ((offset - TIMERN) / TIMER_REGISTER_OFFSET) as usize,
+        },
+
+        SECCFG_CHN..=0x4bc => DmaOffset::Channel {
+            index: ((offset - SECCFG_CHN) / SECCFG_REGISTER_OFFSET) as usize,
+            offset: (offset & 0b11) + SECCFG_CHN,
+        },
+
+        SECCFG_IRQN..=0x4cc => DmaOffset::Interrupt {
+            index: ((offset - SECCFG_IRQN) / SECCFG_REGISTER_OFFSET) as usize,
+            offset: (offset & 0b11) + SECCFG_IRQN,
+        },
+
+        MPU_BARN..=0x540 => DmaOffset::Mpu {
+            index: ((offset - MPU_BARN) / MPU_REGISTER_OFFSET) as usize,
+            offset: (offset & 0b111) + MPU_BARN,
+        },
+
+        _ => DmaOffset::Default,
     }
 }

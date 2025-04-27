@@ -1,18 +1,22 @@
 use crate::bus::Bus;
 use crate::clock::Clock;
-use crate::common::MHZ;
+use crate::common::{MB, MHZ};
 use crate::gpio::GpioController;
+use crate::inspector::Inspector;
 use crate::interrupts::Interrupts;
 use crate::processor::{ProcessorContext, Rp2350Core};
+use crate::Result;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 pub struct Rp2350 {
-    pub clock: Rc<RefCell<Clock>>,
+    pub clock: Rc<Clock>,
     pub bus: Bus,
     pub processor: [Rp2350Core; 2],
+    pub dma: Rc<RefCell<crate::peripherals::Dma>>,
     pub gpio: Rc<RefCell<GpioController>>,
     pub interrupts: Rc<RefCell<Interrupts>>,
+    inspector: Rc<dyn crate::inspector::Inspector>,
 }
 
 impl Default for Rp2350 {
@@ -25,7 +29,7 @@ impl Rp2350 {
     pub fn new() -> Self {
         let gpio = Rc::new(RefCell::new(GpioController::default()));
         let interrupts = Rc::new(RefCell::new(Interrupts::default()));
-        let clock = Rc::new(RefCell::new(Clock::new(150 * MHZ)));
+        let clock = Rc::new(Clock::new(150 * MHZ));
 
         let mut processor = [
             Rp2350Core::new(Rc::clone(&interrupts)),
@@ -37,8 +41,14 @@ impl Rp2350 {
         // By default the second core is sleeping
         processor[1].sleep();
 
+        let bus = Bus::new(Rc::clone(&gpio), Rc::clone(&interrupts), Rc::clone(&clock));
+        let dma = Rc::clone(&bus.peripherals.dma);
+        let inspector = Rc::new(crate::inspector::DummyInspector);
+
         Self {
-            bus: Bus::new(Rc::clone(&gpio), Rc::clone(&interrupts), Rc::clone(&clock)),
+            bus,
+            dma,
+            inspector,
             processor,
             clock,
             interrupts,
@@ -46,32 +56,75 @@ impl Rp2350 {
         }
     }
 
+    pub fn set_inspector(&mut self, inspector: Rc<dyn crate::inspector::Inspector>) {
+        self.inspector = inspector;
+    }
+
+    pub fn flash_bin(&mut self, bin: &[u8]) -> Result<()> {
+        if bin.len() > 4 * MB {
+            return Err(crate::SimulatorError::FileTooLarge);
+        }
+
+        self.bus.flash.write_slice(0, bin).ok();
+        Ok(())
+    }
+
+    pub fn flash_uf2(&mut self, uf2: &[u8]) -> Result<()> {
+        for block in uf2::read_uf2(uf2)? {
+            let Some(family_id) = block.family_id else {
+                log::warn!("No family ID found in UF2 block");
+                continue;
+            };
+
+            if crate::common::is_supported_uf2_family_id(family_id) {
+                log::debug!(
+                    "Flashing block: {:#X} -> {:#X}",
+                    block.target_addr,
+                    block.data.len()
+                );
+            } else {
+                log::warn!("Unsupported UF2 family ID: {:#X}", family_id);
+            }
+
+            let offset = block.target_addr - Bus::XIP;
+            let offset = offset & 0x1FFF_FFFF;
+            if let Err(why) = self.bus.flash.write_slice(offset, &block.data) {
+                log::error!("Failed to write block to flash: {:#}", why);
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn tick(&mut self) {
-        self.clock.borrow_mut().tick();
+        self.clock.tick(&mut self.bus);
         self.bus.tick();
 
         let mut ctx = ProcessorContext {
             bus: &mut self.bus,
+            inspector: Rc::clone(&self.inspector),
             wake_opposite_core: false,
         };
 
-        log::trace!("Ticking core 0");
+        self.inspector.tick(1);
         self.processor[0].tick(&mut ctx);
         let wake_core_1 = ctx.wake_opposite_core;
         ctx.wake_opposite_core = false;
 
-        log::trace!("Ticking core 1");
+        self.inspector.tick(0);
         self.processor[1].tick(&mut ctx);
         let wake_core_0 = ctx.wake_opposite_core;
 
+        self.dma.borrow_mut().tick(&mut self.bus);
+
         // only wake after both cores have ticked
         if wake_core_1 {
-            log::info!("Waking core 1");
+            self.inspector.wake_core(1);
             self.processor[1].wake();
         }
 
         if wake_core_0 {
-            log::info!("Waking core 0");
+            self.inspector.wake_core(0);
             self.processor[0].wake();
         }
     }

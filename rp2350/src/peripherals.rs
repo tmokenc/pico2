@@ -79,7 +79,7 @@ pub struct Peripherals {
     pub tbman: UnimplementedPeripheral,
 
     // AHB peripherals
-    pub dma: Dma,
+    pub dma: Rc<RefCell<Dma>>,
     pub usbctrl: UnimplementedPeripheral,
     pub usbctrl_dpram: UnimplementedPeripheral,
     pub usbctrl_regs: UnimplementedPeripheral,
@@ -91,7 +91,7 @@ pub struct Peripherals {
     // Core local
     pub sio: Sio,
 
-    clock: Rc<RefCell<Clock>>,
+    clock: Rc<Clock>,
     interrupts: Rc<RefCell<Interrupts>>,
     gpio: Rc<RefCell<GpioController>>,
 }
@@ -100,7 +100,7 @@ impl Peripherals {
     pub fn new(
         gpio: Rc<RefCell<GpioController>>,
         interrupts: Rc<RefCell<Interrupts>>,
-        clock: Rc<RefCell<Clock>>,
+        clock: Rc<Clock>,
     ) -> Self {
         Self {
             gpio,
@@ -123,6 +123,7 @@ impl Peripherals {
             gpio: Rc::clone(&self.gpio),
             interrupts: Rc::clone(&self.interrupts),
             clock: Rc::clone(&self.clock),
+            dma: Rc::clone(&self.dma),
         }
     }
 
@@ -287,6 +288,7 @@ impl Peripherals {
 pub enum PeripheralError {
     OutOfBounds,
     MissingPermission,
+    Reserved,
 }
 
 pub type PeripheralResult<T> = std::result::Result<T, PeripheralError>;
@@ -298,7 +300,8 @@ pub struct PeripheralAccessContext {
     pub address: u32,
     pub gpio: Rc<RefCell<GpioController>>,
     pub interrupts: Rc<RefCell<Interrupts>>,
-    pub clock: Rc<RefCell<Clock>>,
+    pub clock: Rc<Clock>,
+    pub dma: Rc<RefCell<Dma>>,
 }
 
 // Purpose: Define the Peripheral trait and a default implementation for unimplemented peripherals.
