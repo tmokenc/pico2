@@ -514,7 +514,7 @@ mod tests {
             let mut $bus = Bus::new(
                 Rc::new(RefCell::new(GpioController::default())),
                 Rc::new(RefCell::new(Interrupts::default())),
-                Rc::new(Clock::new(150_000_000)),
+                Rc::new(Clock::new()),
                 InspectorRef::default(),
             );
         };
