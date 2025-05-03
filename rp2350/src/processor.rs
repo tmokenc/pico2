@@ -14,6 +14,7 @@ use std::rc::Rc;
 pub struct ProcessorContext<'a> {
     pub bus: &'a mut Bus,
     pub inspector: InspectorRef,
+    pub interrupts: Rc<RefCell<Interrupts>>,
     pub wake_opposite_core: bool,
 }
 
@@ -34,8 +35,8 @@ pub enum Rp2350Core {
 }
 
 impl Rp2350Core {
-    pub fn new(interrupts: Rc<RefCell<Interrupts>>) -> Self {
-        Self::RiscV(Hazard3::new(interrupts))
+    pub fn new() -> Self {
+        Self::RiscV(Hazard3::new())
     }
 
     pub fn set_core_id(&mut self, core_id: u8) {

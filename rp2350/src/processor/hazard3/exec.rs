@@ -1535,7 +1535,7 @@ mod tests {
             let gpio = Rc::new(RefCell::new(GpioController::default()));
             let clock = Rc::new(Clock::default());
 
-            let mut $core = Hazard3::new(Rc::clone(&interrupts));
+            let mut $core = Hazard3::new();
             $core.set_pc(PC);
             let mut $bus = Bus::new(gpio, interrupts, clock, Default::default());
         };

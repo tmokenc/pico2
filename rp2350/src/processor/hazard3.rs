@@ -8,8 +8,8 @@ pub mod trap;
 
 use super::{CpuArchitecture, ProcessorContext, Stats};
 use crate::bus::{BusAccessContext, LoadStatus, StoreStatus};
-use crate::common::*;
 use crate::interrupts::Interrupts;
+use crate::{common::*, InspectionEvent};
 use branch_predictor::BranchPredictor;
 use core::mem;
 use csrs::Csrs;
@@ -77,19 +77,11 @@ pub struct Hazard3 {
     // Zcmp extension
     // Some instructions may expand into a sequence of multiple instructions
     pub(self) inst_seq: InstructionSequence,
-
-    // Reference to the interrupts controller
-    interrupts: Rc<RefCell<Interrupts>>,
-
-    // for debugging
-    pub monitor: bool,
-    pub count_instructions: Option<HashMap<&'static str, u32>>,
 }
 
 impl Hazard3 {
-    pub fn new(interrupts: Rc<RefCell<Interrupts>>) -> Self {
+    pub fn new() -> Self {
         Self {
-            interrupts,
             pc: 0x7642, // entry point for the RISC-V bootloader
             state: State::default(),
             registers: Registers::default(),
@@ -97,9 +89,7 @@ impl Hazard3 {
             xx_bypass: None,
             local_monitor_bit: false,
             branch_predictor: BranchPredictor::default(),
-            monitor: false,
             inst_seq: InstructionSequence::default(),
-            count_instructions: None,
         }
     }
 }
@@ -167,21 +157,22 @@ impl CpuArchitecture for Hazard3 {
             ..
         } = exec_ctx;
 
-        if self.monitor {
-            self.instruction_log(inst_code, instruction_name);
-        }
-
-        log::info!(
-            "PC: 0x{:08x} Instruction: 0x{:08x} Name: {}",
-            self.pc,
-            inst_code,
-            instruction_name,
-        );
+        ctx.inspector.raise(InspectionEvent::ExecutedInstruction {
+            core: self.csrs.core_id,
+            instruction: inst_code,
+            address: self.pc,
+            name: instruction_name,
+            operands: Vec::new(), // TODO
+        });
 
         self.csrs.tick();
 
         if let Some(exception) = exception {
-            log::info!("Exception: {:?}", exception);
+            ctx.inspector.raise(InspectionEvent::Exception {
+                core: self.csrs.core_id,
+                exception: exception as u32,
+            });
+
             return self.trap_handle(exception);
         } else {
             self.pc = next_pc;
@@ -246,7 +237,7 @@ impl Hazard3 {
 
     fn update_state(&mut self, ctx: &mut ProcessorContext) {
         match mem::take(&mut self.state) {
-            State::Sleep(state) => {}
+            State::Sleep(_state) => {}
             State::Stall(cycles, reg_write) => {
                 if cycles == 1 {
                     self.xx_bypass = Some(reg_write);
@@ -445,14 +436,6 @@ impl Hazard3 {
             }
         }
     }
-
-    pub(self) fn instruction_log(&mut self, inst_code: u32, name: &'static str) {
-        if let Some(ref mut count) = self.count_instructions {
-            *count.entry(name).or_insert(0) += 1;
-        }
-
-        log::info!("0x{:08x}: 0x{:08x}: {}", self.pc, inst_code, name);
-    }
 }
 
 #[cfg(test)]
@@ -466,7 +449,7 @@ mod tests {
 
     macro_rules! setup {
         ($cpu:tt, $ctx:tt) => {
-            let mut $cpu = Hazard3::new(Default::default());
+            let mut $cpu = Hazard3::new();
             let mut bus = Bus::default();
 
             $cpu.set_pc(SRAM);
@@ -474,6 +457,7 @@ mod tests {
             let mut $ctx = ProcessorContext {
                 bus: &mut bus,
                 wake_opposite_core: false,
+                interrupts: Default::default(),
                 inspector: InspectorRef::default(),
             };
         };

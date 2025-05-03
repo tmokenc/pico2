@@ -7,9 +7,14 @@ pub enum InspectionEvent {
         core: u8,
         instruction: u32,
         address: u32,
-        name: String,
+        name: &'static str,
         operands: Vec<u32>,
     },
+    Exception {
+        core: u8,
+        exception: u32,
+    },
+
     Tick(u8),
     WakeCore(u8),
 
@@ -58,6 +63,11 @@ impl Inspector for DummyInspector {
             InspectionEvent::TrngGenerated(value) => {
                 log::info!("RNG: generated value: {value}");
             }
+
+            InspectionEvent::Exception { core, exception } => {
+                log::info!("Core {core}: Exception: {exception:#010x}");
+            }
+
             InspectionEvent::ExecutedInstruction {
                 core,
                 instruction,
@@ -70,6 +80,7 @@ impl Inspector for DummyInspector {
                     operands
                 );
             }
+
             InspectionEvent::Tick(core) => {
                 log::info!("Core {core}: Tick event");
             }

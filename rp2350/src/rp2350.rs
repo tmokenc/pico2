@@ -1,8 +1,8 @@
 use crate::bus::Bus;
 use crate::clock::Clock;
-use crate::common::{MB, MHZ};
+use crate::common::MB;
 use crate::gpio::GpioController;
-use crate::inspector::{InspectionEvent, Inspector, InspectorRef};
+use crate::inspector::{InspectionEvent, InspectorRef};
 use crate::interrupts::Interrupts;
 use crate::processor::{ProcessorContext, Rp2350Core};
 use crate::Result;
@@ -29,12 +29,9 @@ impl Rp2350 {
     pub fn new() -> Self {
         let gpio = Rc::new(RefCell::new(GpioController::default()));
         let interrupts = Rc::new(RefCell::new(Interrupts::default()));
-        let clock = Rc::new(Clock::new(150 * MHZ));
+        let clock = Rc::new(Clock::new());
 
-        let mut processor = [
-            Rp2350Core::new(Rc::clone(&interrupts)),
-            Rp2350Core::new(Rc::clone(&interrupts)),
-        ];
+        let mut processor = [Rp2350Core::new(), Rp2350Core::new()];
         processor[0].set_core_id(0);
         processor[1].set_core_id(1);
 
@@ -102,17 +99,19 @@ impl Rp2350 {
     }
 
     pub fn tick(&mut self) {
-        self.clock.tick(&mut self.bus);
+        self.clock.tick();
         self.bus.tick();
 
         let mut ctx = ProcessorContext {
             bus: &mut self.bus,
             inspector: self.inspector.clone(),
+            interrupts: Rc::clone(&self.interrupts),
             wake_opposite_core: false,
         };
 
         self.inspector.raise(InspectionEvent::Tick(0));
         self.processor[0].tick(&mut ctx);
+
         let wake_core_1 = ctx.wake_opposite_core;
         ctx.wake_opposite_core = false;
 

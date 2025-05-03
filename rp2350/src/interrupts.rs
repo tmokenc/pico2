@@ -21,8 +21,8 @@ impl Iterator for InterruptIter {
 
 #[derive(Default)]
 pub struct Interrupts {
-    global: Rc<RefCell<u64>>,
-    core1: Rc<RefCell<u64>>,
+    global: u64,
+    core1: u64,
 }
 
 impl Interrupts {
@@ -87,7 +87,7 @@ impl Interrupts {
     /// Enable the IRQ for the given core
     pub fn set_irq(&mut self, irq: Interrupt, value: bool) {
         if value {
-            *self.global.borrow_mut() |= 1 << irq;
+            self.global |= 1 << irq;
         } else {
             self.clear_irq(irq);
         }
@@ -96,9 +96,9 @@ impl Interrupts {
     pub fn set_core_local_irq(&mut self, core: u8, irq: Interrupt, value: bool) {
         if value {
             if core == 0 {
-                *self.global.borrow_mut() |= 1 << irq;
+                self.global |= 1 << irq;
             } else {
-                *self.core1.borrow_mut() |= 1 << irq;
+                self.core1 |= 1 << irq;
             }
         } else {
             self.clear_core_local_irq(core, irq);
@@ -106,23 +106,23 @@ impl Interrupts {
     }
 
     pub fn clear_irq(&mut self, irq: Interrupt) {
-        *self.global.borrow_mut() &= !(1 << irq);
+        self.global &= !(1 << irq);
     }
 
     pub fn clear_core_local_irq(&mut self, core: u8, irq: Interrupt) {
         if core == 0 {
-            *self.global.borrow_mut() &= !(1 << irq);
+            self.global &= !(1 << irq);
         } else {
-            *self.core1.borrow_mut() &= !(1 << irq);
+            self.core1 &= !(1 << irq);
         }
     }
 
     pub fn iter(&self, core: u8) -> InterruptIter {
         if core == 0 {
-            InterruptIter(*self.global.borrow())
+            InterruptIter(self.global)
         } else {
-            let global = *self.global.borrow();
-            let core_local = *self.core1.borrow();
+            let global = self.global;
+            let core_local = self.core1;
 
             // clear bits that are core local from global then combine with core 1 local
             InterruptIter((global & !Self::CORE_LOCAL_IRQS_MASK) | core_local)
