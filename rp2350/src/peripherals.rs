@@ -9,10 +9,13 @@ pub mod bootram;
 pub mod busctrl;
 pub mod clocks;
 pub mod dma;
+pub mod i2c;
 pub mod otp;
+pub mod pwm;
 pub mod reset;
 pub mod sha256;
 pub mod sio;
+pub mod timer;
 pub mod trng;
 pub mod uart;
 pub mod watchdog;
@@ -21,10 +24,13 @@ pub use bootram::BootRam;
 pub use busctrl::BusCtrl;
 pub use clocks::Clocks;
 pub use dma::Dma;
+pub use i2c::I2c;
 pub use otp::Otp;
+pub use pwm::Pwm;
 pub use reset::Reset;
 pub use sha256::Sha256;
 pub use sio::Sio;
+pub use timer::Timer;
 pub use trng::Trng;
 pub use uart::Uart;
 pub use watchdog::WatchDog;
@@ -50,11 +56,12 @@ pub struct Peripherals {
     pub uart1: Rc<RefCell<Uart<1>>>,
     pub spi0: UnimplementedPeripheral,
     pub spi1: UnimplementedPeripheral,
-    pub i2c0: UnimplementedPeripheral,
-    pub i2c1: UnimplementedPeripheral,
+    pub i2c0: Rc<RefCell<I2c<0>>>,
+    pub i2c1: Rc<RefCell<I2c<1>>>,
     pub adc: UnimplementedPeripheral,
-    pub pwm: UnimplementedPeripheral,
-    pub timer: [UnimplementedPeripheral; 2],
+    pub pwm: Rc<RefCell<Pwm>>,
+    pub timer0: Rc<RefCell<Timer<0>>>,
+    pub timer1: Rc<RefCell<Timer<1>>>,
     pub hstx_ctrl: UnimplementedPeripheral,
     pub xip_ctrl: UnimplementedPeripheral,
     pub xip_qmi: UnimplementedPeripheral,
@@ -107,13 +114,27 @@ impl Peripherals {
         clock: Rc<Clock>,
         inspector: InspectorRef,
     ) -> Self {
-        Self {
+        let result = Self {
             gpio,
             interrupts,
             clock,
             inspector,
             ..Default::default()
-        }
+        };
+
+        timer::start_timer(
+            result.timer0.clone(),
+            Rc::clone(&result.clock),
+            Rc::clone(&result.interrupts),
+        );
+
+        timer::start_timer(
+            result.timer1.clone(),
+            Rc::clone(&result.clock),
+            Rc::clone(&result.interrupts),
+        );
+
+        result
     }
 
     pub fn get_context(
@@ -170,8 +191,8 @@ impl Peripherals {
             0x4009_8000 => &mut self.i2c1 as &mut dyn Peripheral,
             0x400A_0000 => &mut self.adc as &mut dyn Peripheral,
             0x400A_8000 => &mut self.pwm as &mut dyn Peripheral,
-            0x400B_0000 => &mut self.timer[0] as &mut dyn Peripheral,
-            0x400B_8000 => &mut self.timer[1] as &mut dyn Peripheral,
+            0x400B_0000 => &mut self.timer0 as &mut dyn Peripheral,
+            0x400B_8000 => &mut self.timer1 as &mut dyn Peripheral,
             0x400C_0000 => &mut self.hstx_ctrl as &mut dyn Peripheral,
             0x400C_8000 => &mut self.xip_ctrl as &mut dyn Peripheral,
             0x400D_0000 => &mut self.xip_qmi as &mut dyn Peripheral,
@@ -242,8 +263,8 @@ impl Peripherals {
             0x4009_8000 => &self.i2c1 as &dyn Peripheral,
             0x400A_0000 => &self.adc as &dyn Peripheral,
             0x400A_8000 => &self.pwm as &dyn Peripheral,
-            0x400B_0000 => &self.timer[0] as &dyn Peripheral,
-            0x400B_8000 => &self.timer[1] as &dyn Peripheral,
+            0x400B_0000 => &self.timer0 as &dyn Peripheral,
+            0x400B_8000 => &self.timer1 as &dyn Peripheral,
             0x400C_0000 => &self.hstx_ctrl as &dyn Peripheral,
             0x400C_8000 => &self.xip_ctrl as &dyn Peripheral,
             0x400D_0000 => &self.xip_qmi as &dyn Peripheral,
