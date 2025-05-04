@@ -69,7 +69,7 @@ pub fn read_uf2(data: &[u8]) -> Result<impl Iterator<Item = Uf2Block>, Error> {
             None
         };
 
-        let data = data[32..508]
+        let data = v[32..508]
             .into_iter()
             .take(payload_size as usize)
             .cloned()
