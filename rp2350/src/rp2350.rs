@@ -1,4 +1,4 @@
-use crate::bus::Bus;
+use crate::bus::{self, Bus};
 use crate::clock::Clock;
 use crate::common::MB;
 use crate::gpio::GpioController;
@@ -69,6 +69,7 @@ impl Rp2350 {
 
     pub fn set_inspector(&mut self, inspector: Rc<dyn crate::inspector::Inspector>) {
         self.inspector.set_inspector(inspector);
+        self.bus.peripherals.inspector = self.inspector.clone();
     }
 
     pub fn flash_bin(&mut self, bin: &[u8]) -> Result<()> {
@@ -97,12 +98,29 @@ impl Rp2350 {
                 log::warn!("Unsupported UF2 family ID: {:#X}", family_id);
             }
 
-            let offset = block.target_addr - Bus::XIP;
-            let offset = offset & 0x1FFF_FFFF;
-            if let Err(why) = self.bus.flash.write_slice(offset, &block.data) {
+            let address = block.target_addr;
+
+            let result = match address & 0xF000_0000 {
+                Bus::XIP => self
+                    .bus
+                    .flash
+                    .write_slice(address & bus::XIP_ADDRESS_MASK, &block.data),
+                Bus::SRAM => self.bus.sram.write_slice(address - Bus::SRAM, &block.data),
+                _ => {
+                    log::warn!("Unsupported target address: {:#X}", block.target_addr);
+                    continue;
+                }
+            };
+
+            if let Err(why) = result {
                 log::error!("Failed to write block to flash: {:#}", why);
             }
         }
+
+        // Dump of the data section
+        // This does not include from the uf2
+        let data_section = include_bytes!("../data.bin");
+        self.bus.set_sram(data_section);
 
         Ok(())
     }
@@ -143,12 +161,25 @@ impl Rp2350 {
     }
 
     pub fn skip_bootrom(&mut self) {
-        // self.processor[0].set_pc(0x1000_0086);
-        // self.processor[1].set_pc(0x1000_0086);
-        self.processor[0].set_pc(0x1000_008a);
-        self.processor[1].set_pc(0x1000_008a);
-        self.processor[0].set_sp(0x2008_0000); // SRAM4
-        self.processor[1].set_sp(0x2008_1000); // SRAM5
+        self.processor[0].set_pc(0x1000_0086);
+        self.processor[1].set_pc(0x1000_0086);
+        // self.processor[0].set_pc(0x1000_008a);
+        // self.processor[1].set_pc(0x1000_008a);
+
+        // dumped registers
+        let regs = [
+            0x00000000, 0x1000021c, 0x20081f50, 0x20002580, 0x00000000, 0x10006620, 0x0000000f,
+            0x20081f50, 0x00000004, 0x20081f50, 0x000f4356, 0x00000000, 0x20004000, 0x400b0000,
+            0x000f4365, 0x400b0000, 0x20003b18, 0x00000001, 0x10000036, 0x00000000, 0x00000000,
+            0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+            0x00000001, 0x00000000, 0x00006aac, 0x000074d6,
+        ];
+
+        for (i, &reg) in regs.iter().enumerate() {
+            self.processor[0].set_register(i as u8, reg);
+            self.processor[1].set_register(i as u8, reg);
+        }
+
         self.processor[1].sleep();
     }
 }

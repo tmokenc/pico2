@@ -205,6 +205,7 @@ impl CpuArchitecture for Hazard3 {
                 value,
                 op,
             } => {
+                log::info!("Hazard3: Atomic operation");
                 self.state = State::Atomic {
                     rd,
                     bus_state,

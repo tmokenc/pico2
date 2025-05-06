@@ -1,6 +1,8 @@
 use std::rc::Rc;
 
+use crate::bus::BusError;
 use crate::clock::EventType;
+use crate::common::{DataSize, Requestor};
 
 #[derive(Debug, Clone)]
 pub enum InspectionEvent {
@@ -18,6 +20,26 @@ pub enum InspectionEvent {
     Exception {
         core: u8,
         exception: u32,
+    },
+
+    BusStore {
+        requestor: Requestor,
+        size: DataSize,
+        address: u32,
+        value: u32,
+    },
+
+    BusLoad {
+        requestor: Requestor,
+        size: DataSize,
+        address: u32,
+    },
+
+    BusError {
+        error: BusError,
+        requestor: Requestor,
+        size: DataSize,
+        address: u32,
     },
 
     TickCore(u8),
@@ -114,6 +136,32 @@ impl Inspector for LoggerInspector {
 
             InspectionEvent::UartRx { uart_index, value } => {
                 log::info!("UART RX event on UART {uart_index}: {value}");
+            }
+
+            InspectionEvent::BusStore {
+                requestor,
+                size,
+                address,
+                value,
+            } => {
+                log::info!("Bus Store: {requestor:?} {size:?} {address:#010x} {value:#010x}");
+            }
+
+            InspectionEvent::BusLoad {
+                requestor,
+                size,
+                address,
+            } => {
+                log::info!("Bus Load: {requestor:?} {size:?} {address:#010x}");
+            }
+
+            InspectionEvent::BusError {
+                error,
+                requestor,
+                size,
+                address,
+            } => {
+                log::info!("Bus Error: {error:?} {requestor:?} {size:?} {address:#010x}");
             }
         }
     }

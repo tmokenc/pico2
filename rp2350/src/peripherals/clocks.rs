@@ -1,7 +1,11 @@
-//! RP2350 Datasheet Section 8.1
-
+/**
+ * @file peripherals/clocks.rs
+ * @author Nguyen Le Duy
+ * @date 06/03/2025
+ * @brief Clock peripheral implementation
+ * @todo Handle the clock source selection and frequency counting
+ */
 use super::*;
-// use std::cell::RefCell;
 
 pub const CLK_GPOUT0_CTRL: u16 = 0x00; // Clock control, can be changed on-the-fly (except for auxsrc)
 pub const CLK_GPOUT0_DIV: u16 = 0x04; // Clock control, can be changed on-the-fly (except for auxsrc)
@@ -135,6 +139,10 @@ pub struct Clocks {
     pub clock_en_wake: [u32; 2],
     pub clock_en_sleep: [u32; 2],
 
+    // Dirty workaround for the simulator
+    clock_sys_selected: u8,
+    clock_ref_selected: u8,
+
     interrupt_enabled: bool,
     interrupt_force: bool,
     // TODO
@@ -178,35 +186,55 @@ impl Default for Clocks {
             interrupt_enabled: false,
             interrupt_force: false,
             clk_sys_resus_status: false,
+            clock_sys_selected: 1,
+            clock_ref_selected: 1,
         }
     }
 }
 
-impl Peripheral for Clocks {
-    fn read(&self, address: u16, ctx: &PeripheralAccessContext) -> PeripheralResult<u32> {
+impl Peripheral for Rc<RefCell<Clocks>> {
+    fn read(&self, address: u16, _ctx: &PeripheralAccessContext) -> PeripheralResult<u32> {
+        let mut clocks = self.borrow_mut();
         let value = match address {
-            CLK_GPOUT0_CTRL => self.gp_outs[0].ctrl,
-            CLK_GPOUT0_DIV => self.gp_outs[0].div,
-            CLK_GPOUT1_CTRL => self.gp_outs[1].ctrl,
-            CLK_GPOUT1_DIV => self.gp_outs[1].div,
-            CLK_GPOUT2_CTRL => self.gp_outs[2].ctrl,
-            CLK_GPOUT2_DIV => self.gp_outs[2].div,
-            CLK_GPOUT3_CTRL => self.gp_outs[3].ctrl,
-            CLK_GPOUT3_DIV => self.gp_outs[3].div,
-            CLK_REF_CTRL => self.clk_ref.ctrl,
-            CLK_REF_DIV => self.clk_ref.div,
-            CLK_REF_SELECTED => 1 << (self.clk_ref.ctrl & 0b11),
-            CLK_SYS_CTRL => self.clk_sys.ctrl,
-            CLK_SYS_DIV => self.clk_sys.div,
-            CLK_SYS_SELECTED => 1 << (self.clk_sys.ctrl & 0b1),
-            CLK_PERI_CTRL => self.clk_peri.ctrl,
-            CLK_PERI_DIV => self.clk_peri.div,
-            CLK_HSTX_CTRL => self.clk_hstx.ctrl,
-            CLK_HSTX_DIV => self.clk_hstx.div,
-            CLK_USB_CTRL => self.clk_usb.ctrl,
-            CLK_USB_DIV => self.clk_usb.div,
-            CLK_ADC_CTRL => self.clk_adc.ctrl,
-            CLK_ADC_DIV => self.clk_adc.div,
+            CLK_GPOUT0_CTRL => clocks.gp_outs[0].ctrl,
+            CLK_GPOUT0_DIV => clocks.gp_outs[0].div,
+            CLK_GPOUT1_CTRL => clocks.gp_outs[1].ctrl,
+            CLK_GPOUT1_DIV => clocks.gp_outs[1].div,
+            CLK_GPOUT2_CTRL => clocks.gp_outs[2].ctrl,
+            CLK_GPOUT2_DIV => clocks.gp_outs[2].div,
+            CLK_GPOUT3_CTRL => clocks.gp_outs[3].ctrl,
+            CLK_GPOUT3_DIV => clocks.gp_outs[3].div,
+            CLK_REF_CTRL => clocks.clk_ref.ctrl,
+            CLK_REF_DIV => clocks.clk_ref.div,
+            CLK_REF_SELECTED => {
+                // dirty hack for the simulator
+                clocks.clock_ref_selected <<= 1;
+                clocks.clock_ref_selected &= 0b111;
+                if clocks.clock_ref_selected == 0 {
+                    clocks.clock_ref_selected = 1;
+                }
+
+                clocks.clock_ref_selected as u32
+            }
+            CLK_SYS_CTRL => clocks.clk_sys.ctrl,
+            CLK_SYS_DIV => clocks.clk_sys.div,
+            CLK_SYS_SELECTED => {
+                // dirty hack for the simulator
+                clocks.clock_sys_selected <<= 1;
+                clocks.clock_sys_selected &= 0b111;
+                if clocks.clock_sys_selected == 0 {
+                    clocks.clock_sys_selected = 1;
+                }
+                clocks.clock_sys_selected as u32
+            }
+            CLK_PERI_CTRL => clocks.clk_peri.ctrl,
+            CLK_PERI_DIV => clocks.clk_peri.div,
+            CLK_HSTX_CTRL => clocks.clk_hstx.ctrl,
+            CLK_HSTX_DIV => clocks.clk_hstx.div,
+            CLK_USB_CTRL => clocks.clk_usb.ctrl,
+            CLK_USB_DIV => clocks.clk_usb.div,
+            CLK_ADC_CTRL => clocks.clk_adc.ctrl,
+            CLK_ADC_DIV => clocks.clk_adc.div,
 
             CLK_GPOUT0_SELECTED  // hardwired to 1
             | CLK_GPOUT1_SELECTED
@@ -217,34 +245,34 @@ impl Peripheral for Clocks {
             | CLK_USB_SELECTED
             | CLK_ADC_SELECTED => 0x1,
 
-            DFTCLK_XOSC_CTRL => self.dftclk_xosc_ctrl as u32,
-            DFTCLK_ROSC_CTRL => self.dftclk_rosc_ctrl as u32,
-            DFTCLK_LPOSC_CTRL => self.dftclk_losc_ctrl as u32,
-            CLK_SYS_RESUS_CTRL => self.clk_sys_resus_ctrl,
-            CLK_SYS_RESUS_STATUS => self.clk_sys_resus_status as u32,
-            FC0_REF_KHZ => self.fc0_ref_khz,
-            FC0_MIN_KHZ => self.fc0_min_khz,
-            FC0_MAX_KHZ => self.fc0_max_khz,
-            FC0_DELAY => self.fc0_delay as u32,
-            FC0_INTERVAL => self.fc0_interval as u32,
-            FC0_SRC => self.fc0_src as u32,
-            FC0_STATUS => self.fc0_status,
-            FC0_RESULT => self.fc0_result,
-            WAKE_EN0 => self.clock_en_wake[0],
-            WAKE_EN1 => self.clock_en_wake[1],
-            SLEEP_EN0 => self.clock_en_sleep[0],
-            SLEEP_EN1 => self.clock_en_sleep[1],
-            ENABLED0 => match self.mode {
-                ClockMode::Wake => self.clock_en_wake[0],
-                ClockMode::Sleep => self.clock_en_sleep[0],
+            DFTCLK_XOSC_CTRL => clocks.dftclk_xosc_ctrl as u32,
+            DFTCLK_ROSC_CTRL => clocks.dftclk_rosc_ctrl as u32,
+            DFTCLK_LPOSC_CTRL => clocks.dftclk_losc_ctrl as u32,
+            CLK_SYS_RESUS_CTRL => clocks.clk_sys_resus_ctrl,
+            CLK_SYS_RESUS_STATUS => clocks.clk_sys_resus_status as u32,
+            FC0_REF_KHZ => clocks.fc0_ref_khz,
+            FC0_MIN_KHZ => clocks.fc0_min_khz,
+            FC0_MAX_KHZ => clocks.fc0_max_khz,
+            FC0_DELAY => clocks.fc0_delay as u32,
+            FC0_INTERVAL => clocks.fc0_interval as u32,
+            FC0_SRC => clocks.fc0_src as u32,
+            FC0_STATUS => clocks.fc0_status,
+            FC0_RESULT => clocks.fc0_result,
+            WAKE_EN0 => clocks.clock_en_wake[0],
+            WAKE_EN1 => clocks.clock_en_wake[1],
+            SLEEP_EN0 => clocks.clock_en_sleep[0],
+            SLEEP_EN1 => clocks.clock_en_sleep[1],
+            ENABLED0 => match clocks.mode {
+                ClockMode::Wake => clocks.clock_en_wake[0],
+                ClockMode::Sleep => clocks.clock_en_sleep[0],
             },
-            ENABLED1 => match self.mode {
-                ClockMode::Wake => self.clock_en_wake[1],
-                ClockMode::Sleep => self.clock_en_sleep[1],
+            ENABLED1 => match clocks.mode {
+                ClockMode::Wake => clocks.clock_en_wake[1],
+                ClockMode::Sleep => clocks.clock_en_sleep[1],
             },
             INTR => 0, // TODO is this correct?
-            INTE => self.interrupt_enabled as u32,
-            INTF => self.interrupt_force as u32,
+            INTE => clocks.interrupt_enabled as u32,
+            INTF => clocks.interrupt_force as u32,
             INTS => 0, // TODO is this correct?
 
             _ => {
@@ -259,44 +287,45 @@ impl Peripheral for Clocks {
         &mut self,
         address: u16,
         value: u32,
-        ctx: &PeripheralAccessContext,
+        _ctx: &PeripheralAccessContext,
     ) -> PeripheralResult<()> {
+        let mut clocks = self.borrow_mut();
         match address {
-            CLK_GPOUT0_CTRL => self.gp_outs[0].write_ctrl(value),
-            CLK_GPOUT0_DIV => self.gp_outs[0].div = value,
-            CLK_GPOUT1_CTRL => self.gp_outs[1].write_ctrl(value),
-            CLK_GPOUT1_DIV => self.gp_outs[1].div = value,
-            CLK_GPOUT2_CTRL => self.gp_outs[2].write_ctrl(value),
-            CLK_GPOUT2_DIV => self.gp_outs[2].div = value,
-            CLK_GPOUT3_CTRL => self.gp_outs[3].write_ctrl(value),
-            CLK_GPOUT3_DIV => self.gp_outs[3].div = value,
-            CLK_REF_CTRL => self.clk_ref.write_ctrl(value),
-            CLK_REF_DIV => self.clk_ref.div = value,
-            CLK_SYS_CTRL => self.clk_sys.write_ctrl(value),
-            CLK_SYS_DIV => self.clk_sys.div = value,
-            CLK_PERI_CTRL => self.clk_peri.write_ctrl(value),
-            CLK_PERI_DIV => self.clk_peri.div = value,
-            CLK_HSTX_CTRL => self.clk_hstx.write_ctrl(value),
-            CLK_HSTX_DIV => self.clk_hstx.div = value,
-            CLK_USB_CTRL => self.clk_usb.write_ctrl(value),
-            CLK_USB_DIV => self.clk_usb.div = value,
-            CLK_ADC_CTRL => self.clk_adc.write_ctrl(value),
-            CLK_ADC_DIV => self.clk_adc.div = value,
-            DFTCLK_XOSC_CTRL => self.dftclk_xosc_ctrl = value as u8,
-            DFTCLK_ROSC_CTRL => self.dftclk_rosc_ctrl = value as u8,
-            DFTCLK_LPOSC_CTRL => self.dftclk_losc_ctrl = value as u8,
-            FC0_REF_KHZ => self.fc0_ref_khz = value,
-            FC0_MIN_KHZ => self.fc0_min_khz = value,
-            FC0_MAX_KHZ => self.fc0_max_khz = value,
-            FC0_DELAY => self.fc0_delay = value as u8,
-            FC0_INTERVAL => self.fc0_interval = value as u8,
-            FC0_SRC => self.fc0_src = value as u8,
-            WAKE_EN0 => self.clock_en_wake[0] = value,
-            WAKE_EN1 => self.clock_en_wake[1] = value,
-            SLEEP_EN0 => self.clock_en_sleep[0] = value,
-            SLEEP_EN1 => self.clock_en_sleep[1] = value,
-            INTE => self.interrupt_enabled = (value & 1) != 0,
-            INTF => self.interrupt_force = (value & 1) != 0,
+            CLK_GPOUT0_CTRL => clocks.gp_outs[0].write_ctrl(value),
+            CLK_GPOUT0_DIV => clocks.gp_outs[0].div = value,
+            CLK_GPOUT1_CTRL => clocks.gp_outs[1].write_ctrl(value),
+            CLK_GPOUT1_DIV => clocks.gp_outs[1].div = value,
+            CLK_GPOUT2_CTRL => clocks.gp_outs[2].write_ctrl(value),
+            CLK_GPOUT2_DIV => clocks.gp_outs[2].div = value,
+            CLK_GPOUT3_CTRL => clocks.gp_outs[3].write_ctrl(value),
+            CLK_GPOUT3_DIV => clocks.gp_outs[3].div = value,
+            CLK_REF_CTRL => clocks.clk_ref.write_ctrl(value),
+            CLK_REF_DIV => clocks.clk_ref.div = value,
+            CLK_SYS_CTRL => clocks.clk_sys.write_ctrl(value),
+            CLK_SYS_DIV => clocks.clk_sys.div = value,
+            CLK_PERI_CTRL => clocks.clk_peri.write_ctrl(value),
+            CLK_PERI_DIV => clocks.clk_peri.div = value,
+            CLK_HSTX_CTRL => clocks.clk_hstx.write_ctrl(value),
+            CLK_HSTX_DIV => clocks.clk_hstx.div = value,
+            CLK_USB_CTRL => clocks.clk_usb.write_ctrl(value),
+            CLK_USB_DIV => clocks.clk_usb.div = value,
+            CLK_ADC_CTRL => clocks.clk_adc.write_ctrl(value),
+            CLK_ADC_DIV => clocks.clk_adc.div = value,
+            DFTCLK_XOSC_CTRL => clocks.dftclk_xosc_ctrl = value as u8,
+            DFTCLK_ROSC_CTRL => clocks.dftclk_rosc_ctrl = value as u8,
+            DFTCLK_LPOSC_CTRL => clocks.dftclk_losc_ctrl = value as u8,
+            FC0_REF_KHZ => clocks.fc0_ref_khz = value,
+            FC0_MIN_KHZ => clocks.fc0_min_khz = value,
+            FC0_MAX_KHZ => clocks.fc0_max_khz = value,
+            FC0_DELAY => clocks.fc0_delay = value as u8,
+            FC0_INTERVAL => clocks.fc0_interval = value as u8,
+            FC0_SRC => clocks.fc0_src = value as u8,
+            WAKE_EN0 => clocks.clock_en_wake[0] = value,
+            WAKE_EN1 => clocks.clock_en_wake[1] = value,
+            SLEEP_EN0 => clocks.clock_en_sleep[0] = value,
+            SLEEP_EN1 => clocks.clock_en_sleep[1] = value,
+            INTE => clocks.interrupt_enabled = (value & 1) != 0,
+            INTF => clocks.interrupt_force = (value & 1) != 0,
 
             CLK_REF_SELECTED  // readonly
             | CLK_SYS_SELECTED

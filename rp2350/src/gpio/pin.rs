@@ -38,7 +38,10 @@ impl GpioPin {
 
     pub fn func_sel(&self) -> FunctionSelect {
         let index = self.ctrl & 0b1111;
-        FUNCTION_SELECTS[self.index as usize][index as usize]
+        FUNCTION_SELECTS[self.index as usize]
+            .get(index as usize)
+            .copied()
+            .unwrap_or(FunctionSelect::None)
     }
 
     pub fn out_override(&self) -> Override {

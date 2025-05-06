@@ -19,14 +19,17 @@ pub mod i2c;
 pub mod io;
 pub mod otp;
 pub mod pads;
+pub mod pll;
 pub mod pwm;
 pub mod reset;
 pub mod sha256;
 pub mod sio;
+pub mod ticks;
 pub mod timer;
 pub mod trng;
 pub mod uart;
 pub mod watchdog;
+pub mod xosc;
 
 pub use bootram::BootRam;
 pub use busctrl::BusCtrl;
@@ -36,30 +39,33 @@ pub use i2c::I2c;
 pub use io::IoBank0;
 pub use otp::Otp;
 pub use pads::PadsBank0;
+pub use pll::Pll;
 pub use pwm::Pwm;
 pub use reset::Reset;
 pub use sha256::Sha256;
 pub use sio::Sio;
+pub use ticks::Ticks;
 pub use timer::Timer;
 pub use trng::Trng;
 pub use uart::Uart;
 pub use watchdog::WatchDog;
+pub use xosc::Xosc;
 
 #[derive(Default)]
 pub struct Peripherals {
     // APB peripherals
     pub sysinfo: UnimplementedPeripheral,
     pub syscfg: UnimplementedPeripheral,
-    pub clocks: Clocks,
+    pub clocks: Rc<RefCell<Clocks>>,
     pub psm: UnimplementedPeripheral,
     pub resets: Reset,
     pub io_bank0: IoBank0,
     pub io_qspi: UnimplementedPeripheral,
     pub pads_bank0: PadsBank0,
     pub pads_qspi: UnimplementedPeripheral,
-    pub xosc: UnimplementedPeripheral,
-    pub pll_sys: UnimplementedPeripheral,
-    pub pll_usb: UnimplementedPeripheral,
+    pub xosc: Xosc,
+    pub pll_sys: Pll<0>,
+    pub pll_usb: Pll<1>,
     pub accessctrl: UnimplementedPeripheral,
     pub busctrl: BusCtrl,
     pub uart0: Rc<RefCell<Uart<0>>>,
@@ -81,7 +87,7 @@ pub struct Peripherals {
     pub trng: Trng,
     pub sha256: Rc<RefCell<Sha256>>,
     pub powman: UnimplementedPeripheral,
-    pub ticks: UnimplementedPeripheral,
+    pub ticks: Ticks,
     pub otp: Otp,
     pub otp_data: UnimplementedPeripheral,
     pub otp_data_raw: UnimplementedPeripheral,
@@ -114,7 +120,7 @@ pub struct Peripherals {
     clock: Rc<Clock>,
     interrupts: Rc<RefCell<Interrupts>>,
     gpio: Rc<RefCell<GpioController>>,
-    inspector: InspectorRef,
+    pub(crate) inspector: InspectorRef,
 }
 
 impl Peripherals {

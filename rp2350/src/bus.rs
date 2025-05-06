@@ -5,11 +5,14 @@ use crate::interrupts::Interrupts;
 use crate::memory::*;
 use crate::peripherals::*;
 use crate::utils::*;
+use crate::InspectionEvent;
 use crate::InspectorRef;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 // TODO - counter
+
+pub const XIP_ADDRESS_MASK: u32 = 0x00FF_FFFF;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BusError {
@@ -109,7 +112,6 @@ pub struct Bus {
 
     core0_exclusive: Option<u32>, // address
     core1_exclusive: Option<u32>, // address
-    inspector: InspectorRef,
 }
 
 impl Default for Bus {
@@ -125,7 +127,6 @@ impl Default for Bus {
             core1_access: None,
             core0_exclusive: None,
             core1_exclusive: None,
-            inspector: InspectorRef::default(),
         };
 
         res.set_rom(*include_bytes!("../bootrom-combined.bin"));
@@ -151,7 +152,6 @@ impl Bus {
     ) -> Self {
         Self {
             peripherals: Peripherals::new(gpio, interrupts, clock, inspector.clone()),
-            inspector,
             ..Default::default()
         }
     }
@@ -167,12 +167,18 @@ impl Bus {
         self.core1_exclusive = None;
     }
 
+    fn inspector(&self) -> &InspectorRef {
+        &self.peripherals.inspector
+    }
+
     pub fn set_rom(&mut self, data: [u8; 32 * KB]) {
         self.rom = GenericMemory::new(&data);
     }
 
-    pub fn set_sram(&mut self, data: [u8; 520 * KB]) {
-        self.sram = GenericMemory::new(&data);
+    pub fn set_sram(&mut self, data: &[u8]) {
+        if let Err(why) = self.sram.write_slice(0, data) {
+            log::error!("Failed to write SRAM: {why:?}");
+        }
     }
 
     pub fn tick(&mut self) {
@@ -227,7 +233,15 @@ impl Bus {
                     Ok(v) if status.ctx.exclusive => LoadStatus::ExclusiveDone(v),
                     Ok(v) => LoadStatus::Done(v),
                     Err(BusError::ConcurrentAccess) => LoadStatus::Waiting,
-                    Err(_e) => LoadStatus::Error(BusError::LoadError),
+                    Err(_e) => {
+                        self.inspector().emit(InspectionEvent::BusError {
+                            error: BusError::LoadError,
+                            requestor: status.ctx.requestor,
+                            size: status.ctx.size,
+                            address: status.address,
+                        });
+                        LoadStatus::Error(BusError::LoadError)
+                    }
                 };
             }
 
@@ -241,7 +255,15 @@ impl Bus {
                     Ok(_) if status.ctx.exclusive => StoreStatus::ExclusiveDone,
                     Ok(_) => StoreStatus::Done,
                     Err(BusError::ConcurrentAccess) => StoreStatus::Waiting,
-                    Err(_e) => StoreStatus::Error(BusError::StoreError),
+                    Err(_e) => {
+                        self.inspector().emit(InspectionEvent::BusError {
+                            error: BusError::StoreError,
+                            requestor: status.ctx.requestor,
+                            size: status.ctx.size,
+                            address: status.address,
+                        });
+                        StoreStatus::Error(BusError::StoreError)
+                    }
                 };
             }
         }
@@ -254,17 +276,31 @@ impl Bus {
             && (base_address != Self::SRAM)
             && (base_address != Self::XIP)
         {
+            self.inspector().emit(InspectionEvent::BusError {
+                error: BusError::BusFault,
+                requestor: Requestor::Proc0,
+                size: DataSize::Word,
+                address,
+            });
             return Err(BusError::BusFault);
         }
 
         let result = match address & 0xF000_0000 {
             Self::ROM => self.rom.read_u32(address),
             Self::SRAM => self.sram.read_u32(address - Self::SRAM),
-            Self::XIP => self.flash.read_u32(address & 0x0FFF_FFFF),
+            Self::XIP => self.flash.read_u32(address & XIP_ADDRESS_MASK),
             _ => return Err(BusError::BusFault),
         };
 
-        result.map_err(|_| BusError::BusFault)
+        result.map_err(|_| {
+            self.inspector().emit(InspectionEvent::BusError {
+                error: BusError::BusFault,
+                requestor: Requestor::Proc0,
+                size: DataSize::Word,
+                address,
+            });
+            BusError::BusFault
+        })
     }
 
     /// Call by a load instruction
@@ -274,9 +310,21 @@ impl Bus {
         ctx: BusAccessContext,
     ) -> BusResult<Rc<RefCell<LoadStatus>>> {
         // TODO: counter
+        self.inspector().emit(InspectionEvent::BusLoad {
+            requestor: ctx.requestor,
+            size: ctx.size,
+            address,
+        });
 
         // check for address correctness
         if !self.is_valid_address(address, &ctx) {
+            self.inspector().emit(InspectionEvent::BusError {
+                error: BusError::BusFault,
+                requestor: ctx.requestor,
+                size: ctx.size,
+                address,
+            });
+
             return Err(BusError::BusFault);
         }
 
@@ -307,9 +355,21 @@ impl Bus {
         ctx: BusAccessContext,
     ) -> BusResult<Rc<RefCell<StoreStatus>>> {
         // TODO: counter
+        self.inspector().emit(InspectionEvent::BusStore {
+            requestor: ctx.requestor,
+            size: ctx.size,
+            address,
+            value,
+        });
 
         // check for address correctness
         if !self.is_valid_address(address, &ctx) {
+            self.inspector().emit(InspectionEvent::BusError {
+                error: BusError::BusFault,
+                requestor: ctx.requestor,
+                size: ctx.size,
+                address,
+            });
             return Err(BusError::BusFault);
         }
 
@@ -394,7 +454,7 @@ impl Bus {
         match address & 0xF000_0000 {
             Self::ROM => Ok(self.rom.read_u32(address)?),
             Self::SRAM => Ok(self.sram.read_u32(address - Self::SRAM)?),
-            Self::XIP => Ok(self.flash.read_u32(address & 0x1FFF_FFFF)?),
+            Self::XIP => Ok(self.flash.read_u32(address & XIP_ADDRESS_MASK)?),
             _ => {
                 let peri_ctx = self
                     .peripherals
@@ -428,7 +488,7 @@ impl Bus {
         match address & 0xF000_0000 {
             Self::ROM => (),
             Self::SRAM => self.sram.write_u32(address - Self::SRAM, value)?,
-            Self::XIP => self.flash.write_u32(address & 0x1FFF_FFFF, value)?,
+            Self::XIP => self.flash.write_u32(address & XIP_ADDRESS_MASK, value)?,
             _ => {
                 let peri_ctx = self
                     .peripherals
@@ -449,7 +509,7 @@ impl Bus {
         match address & 0xF000_0000 {
             Self::ROM => Ok(self.rom.read_u16(address)?),
             Self::SRAM => Ok(self.sram.read_u16(address - Self::SRAM)?),
-            Self::XIP => Ok(self.flash.read_u16(address & 0x1FFF_FFFF)?),
+            Self::XIP => Ok(self.flash.read_u16(address & XIP_ADDRESS_MASK)?),
             _ => {
                 let value = self.read_u32(address & !0b11, ctx)?;
                 if (address & 0b11) == 0 {
@@ -465,7 +525,7 @@ impl Bus {
         match address & 0xF000_0000 {
             Self::ROM => (),
             Self::SRAM => self.sram.write_u16(address - Self::SRAM, value as u16)?,
-            Self::XIP => self.flash.write_u16(address & 0x1FFF_FFFF, value as u16)?,
+            Self::XIP => self.flash.write_u16(address & 0x00FF_FFFF, value as u16)?,
             _ => {
                 let value = if (address & 0b11) == 0 {
                     value & 0x0000_FFFF
@@ -484,7 +544,7 @@ impl Bus {
         match address & 0xF000_0000 {
             Self::ROM => Ok(self.rom.read_u8(address)?),
             Self::SRAM => Ok(self.sram.read_u8(address - Self::SRAM)?),
-            Self::XIP => Ok(self.flash.read_u8(address & 0x1FFF_FFFF)?),
+            Self::XIP => Ok(self.flash.read_u8(address & XIP_ADDRESS_MASK)?),
             _ => {
                 let value = self.read_u32(address & !0b11, ctx)?;
                 let index = address as usize & 0b11;
@@ -497,7 +557,9 @@ impl Bus {
         match address & 0xF000_0000 {
             Self::ROM => (),
             Self::SRAM => self.sram.write_u8(address - Self::SRAM, value as u8)?,
-            Self::XIP => self.flash.write_u8(address & 0x1FFF_FFFF, value as u8)?,
+            Self::XIP => self
+                .flash
+                .write_u8(address & XIP_ADDRESS_MASK, value as u8)?,
             _ => {
                 let value = value & 0xFF;
                 let value = match address & 0b11 {

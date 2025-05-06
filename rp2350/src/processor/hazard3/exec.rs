@@ -1,3 +1,9 @@
+/**
+ * @file /processor/hazard/exec.rs
+ * @author Nguyen Le Duy
+ * @date 02/01/2025
+ * @brief Hazard3 processor execution unit
+ */
 use super::instruction_format::*;
 use super::registers::{Register, RegisterValue};
 use super::PrivilegeMode;

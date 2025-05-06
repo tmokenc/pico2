@@ -41,7 +41,7 @@ pub struct Registers {
 }
 
 impl Registers {
-    pub(super) fn write(&mut self, rd: Register, value: impl RegisterValue) {
+    pub fn write(&mut self, rd: Register, value: impl RegisterValue) {
         assert!(rd < 32);
         let value = value.as_u32();
         self.x[rd as usize] = value.as_u32();

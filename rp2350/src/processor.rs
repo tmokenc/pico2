@@ -21,7 +21,6 @@ pub trait CpuArchitecture {
     fn get_pc(&self) -> u32;
     fn set_pc(&mut self, value: u32);
     fn set_sp(&mut self, value: u32);
-    // fn set_irq(&mut self, irq: Interrupt);
     fn tick(&mut self, ctx: &mut ProcessorContext);
     fn sleep(&mut self);
     fn wake(&mut self);
@@ -76,6 +75,13 @@ impl Rp2350Core {
         match self {
             Self::Arm(core) => core.set_sp(value),
             Self::RiscV(core) => core.set_sp(value),
+        }
+    }
+
+    pub fn set_register(&mut self, reg: u8, value: u32) {
+        match self {
+            Self::RiscV(core) => core.registers.write(reg, value),
+            _ => {} // TODO
         }
     }
 }

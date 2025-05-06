@@ -107,7 +107,7 @@ impl<const IDX: usize> Default for Uart<IDX> {
 
             baud_divint: 0,
             baud_divfrac: 0,
-            ctrl: CTRL_RXE | CTRL_TXE,
+            ctrl: CTRL_RXE | CTRL_TXE | CTRL_UARTEN,
             line_ctrl: 0,
             flags: FLAG_TXFE | FLAG_RXFE,
             fifo_level_select: (0x2 << 3) | 0x2,
@@ -123,13 +123,14 @@ impl<const IDX: usize> Default for Uart<IDX> {
 impl<const IDX: usize> Uart<IDX> {
     fn update_baudrate(&mut self, divint: impl Into<Option<u16>>, divfrac: impl Into<Option<u8>>) {
         if let Some(divint) = divint.into() {
+            log::error!("UART{}: baudrate set to {} (divint)", IDX, divint);
             self.baud_divint = divint;
         }
 
         if let Some(divfrac) = divfrac.into() {
+            log::error!("UART{}: baudrate set to {} (divfrac)", IDX, divfrac);
             self.baud_divfrac = divfrac;
         }
-        // TODO
     }
 
     pub fn set_busy(&mut self, busy: bool) {
@@ -140,13 +141,56 @@ impl<const IDX: usize> Uart<IDX> {
         }
     }
 
+    // Inspired by the implementation in the pico-sdk
+    // https://github.com/raspberrypi/pico-sdk/blob/ee68c78d0afae2b69c03ae1a72bf5cc267a2d94c/src/rp2_common/hardware_uart/uart.c#L155
     pub fn get_baudrate(&self) -> u32 {
-        let baudrate = (self.baud_divint as u32 * 16 + self.baud_divfrac as u32) * 1000;
-        baudrate
+        //     uint32_t baud_rate_div = (8 * uart_clock_get_hz(uart) / baudrate) + 1;
+        //     uint32_t baud_ibrd = baud_rate_div >> 7;
+        //     uint32_t baud_fbrd;
+        //
+        //     if (baud_ibrd == 0) {
+        //         baud_ibrd = 1;
+        //         baud_fbrd = 0;
+        //     } else if (baud_ibrd >= 65535) {
+        //         baud_ibrd = 65535;
+        //         baud_fbrd = 0;
+        //     }  else {
+        //         baud_fbrd = (baud_rate_div & 0x7f) >> 1;
+        //     }
+        //
+        //     uart_get_hw(uart)->ibrd = baud_ibrd;
+        //     uart_get_hw(uart)->fbrd = baud_fbrd;
+        //
+        //     // PL011 needs a (dummy) LCR_H write to latch in the divisors.
+        //     // We don't want to actually change LCR_H contents here.
+        //     uart_write_lcr_bits_masked(uart, 0, 0);
+        //
+        //     // See datasheet
+        //     return (4 * uart_clock_get_hz(uart)) / (64 * baud_ibrd + baud_fbrd);
+        let mut baud_ibrd = self.baud_divint as u64;
+        let mut baud_fbrd = self.baud_divfrac as u64;
+
+        if baud_ibrd == 0 {
+            baud_ibrd = 1;
+            baud_fbrd = 0;
+        } else if baud_ibrd >= 65535 {
+            baud_ibrd = 65535;
+            baud_fbrd = 0;
+        }
+
+        let clock = 150 * MHZ;
+        let baudrate = (4 * clock) / (64 * baud_ibrd + baud_fbrd);
+        baudrate as u32
     }
 
     fn get_bit_time(&self) -> Duration {
-        Duration::from_secs(1) / self.get_baudrate()
+        let baudrate = self.get_baudrate();
+        let base_duration = Duration::from_secs_f64(1. / (150 * MHZ) as f64);
+        if baudrate == 0 {
+            return base_duration;
+        }
+
+        base_duration / (16 * self.get_baudrate())
     }
 
     pub fn fifo_level(&self, level: u8) -> u8 {

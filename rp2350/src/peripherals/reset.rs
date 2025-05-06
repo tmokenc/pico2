@@ -26,8 +26,20 @@ impl Peripheral for Reset {
         let value = match address {
             FRCE_ON => self.frce_on,
             FRCE_OFF => self.frce_off,
-            WDSEL => self.wdsel,
-            DONE => 0x1fff_ffff, // In our simulator, this is always ready
+            WDSEL => {
+                if self.wdsel == 0 {
+                    0x1fff_ffff // In our simulator, this is always ready
+                } else {
+                    self.wdsel
+                }
+            }
+            DONE => {
+                if self.frce_on == 0 {
+                    0x1fff_ffff // In our simulator, this is always ready
+                } else {
+                    0
+                }
+            }
             _ => return Err(PeripheralError::OutOfBounds),
         };
 
