@@ -6,7 +6,7 @@ pub(crate) mod instruction_format;
 pub mod registers;
 pub mod trap;
 
-use super::{CpuArchitecture, ProcessorContext, Stats};
+use super::{CpuArchitecture, ProcessorContext};
 use crate::bus::{BusAccessContext, LoadStatus, StoreStatus};
 use crate::interrupts::Interrupts;
 use crate::{common::*, InspectionEvent};
@@ -17,7 +17,6 @@ pub use csrs::PrivilegeMode;
 use exec::*;
 pub use registers::*;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 use trap::*;
 
@@ -107,6 +106,10 @@ impl CpuArchitecture for Hazard3 {
         self.pc = value;
     }
 
+    fn set_sp(&mut self, value: u32) {
+        self.registers.write(2, value);
+    }
+
     fn tick(&mut self, ctx: &mut ProcessorContext) {
         if let State::Sleep(_) = self.state {
             log::trace!("Processor is sleeping");
@@ -157,7 +160,7 @@ impl CpuArchitecture for Hazard3 {
             ..
         } = exec_ctx;
 
-        ctx.inspector.raise(InspectionEvent::ExecutedInstruction {
+        ctx.inspector.emit(InspectionEvent::ExecutedInstruction {
             core: self.csrs.core_id,
             instruction: inst_code,
             address: self.pc,
@@ -168,7 +171,7 @@ impl CpuArchitecture for Hazard3 {
         self.csrs.tick();
 
         if let Some(exception) = exception {
-            ctx.inspector.raise(InspectionEvent::Exception {
+            ctx.inspector.emit(InspectionEvent::Exception {
                 core: self.csrs.core_id,
                 exception: exception as u32,
             });
@@ -223,10 +226,6 @@ impl CpuArchitecture for Hazard3 {
         if let State::Sleep(state) = mem::take(&mut self.state) {
             self.state = *state;
         }
-    }
-
-    fn stats(&self) -> &Stats {
-        todo!()
     }
 }
 

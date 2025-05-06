@@ -1,0 +1,107 @@
+// @file gpio/function_select.rs
+// @author Nguyen Le Duy
+// @date 14/04/2025
+// @brief Definition of the GPIO function select
+
+#![allow(non_camel_case_types)]
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[rustfmt::skip]
+pub enum FunctionSelect {
+    #[default]
+    None = 99,
+    SPI0_RX = 0,
+    SPI0_CSn = 1,
+    SPI0_SCK = 2,
+    SPI0_TX = 3,
+    SPI1_RX = 4,
+    SPI1_CSn = 5,
+    SPI1_SCK = 6,
+    SPI1_TX = 7,
+    UART0_TX = 8,
+    UART0_RX = 9,
+    UART0_CTS = 10,
+    UART0_RTS = 11,
+    UART1_TX = 12,
+    UART1_RX = 13,
+    UART1_CTS = 14,
+    UART1_RTS = 15,
+    I2C0_SDA = 16,
+    I2C0_SCL = 17,
+    I2C1_SDA = 18,
+    I2C1_SCL = 19,
+    PWM0_A = 20,
+    PWM0_B = 21,
+    PWM1_A = 22,
+    PWM1_B = 23,
+    PWM2_A = 24,
+    PWM2_B = 25,
+    PWM3_A = 26,
+    PWM3_B = 27,
+    PWM4_A = 28,
+    PWM4_B = 29,
+    PWM5_A = 30,
+    PWM5_B = 31,
+    PWM6_A = 32,
+    PWM6_B = 33,
+    PWM7_A = 34,
+    PWM7_B = 35,
+    SIO = 36,
+    PIO_0 = 37,
+    PIO_1 = 38,
+    PIO_2 = 39,
+    HSTX = 40,
+    QMI_CS1n = 41,
+    TRACECKL = 42,
+    TRACEDATA0 = 43,
+    TRACEDATA1 = 44,
+    TRACEDATA2 = 45,
+    TRACEDATA3 = 46,
+    CLOCK_GPINO = 47,
+    CLOCK_GPOUTO = 48,
+    CLOCK_GPIN1 = 49,
+    CLOCK_GPOUT1 = 50,
+    CLOCK_GPOUT2 = 51,
+    CLOCK_GPOUT3 = 52,
+    USB_OVCUR_DET = 53,
+    USB_VBUS_DET = 54,
+    USB_VBUS_EN = 55,
+}
+
+use FunctionSelect::*;
+
+/// GPIO functions for each pin
+/// As in the datasheet for the RP2350 section 1.2.3.
+#[rustfmt::skip]
+pub const FUNCTION_SELECTS: [[FunctionSelect; 12]; 30] = [
+/* GPIO 00 */ [None, SPI0_RX,  UART0_TX,  I2C0_SDA, PWM0_A, SIO, PIO_0, PIO_1, PIO_2, QMI_CS1n,     USB_OVCUR_DET, None],
+/* GPIO 01 */ [None, SPI0_CSn, UART0_RX,  I2C0_SCL, PWM0_B, SIO, PIO_0, PIO_1, PIO_2, TRACECKL,     USB_VBUS_DET,  None],
+/* GPIO 02 */ [None, SPI0_SCK, UART0_CTS, I2C1_SDA, PWM1_A, SIO, PIO_0, PIO_1, PIO_2, TRACEDATA0,   USB_VBUS_EN,   UART0_TX],
+/* GPIO 03 */ [None, SPI0_TX,  UART0_RTS, I2C1_SCL, PWM1_B, SIO, PIO_0, PIO_1, PIO_2, TRACEDATA1,   USB_OVCUR_DET, UART0_RX],
+/* GPIO 04 */ [None, SPI0_RX,  UART1_TX,  I2C0_SDA, PWM2_A, SIO, PIO_0, PIO_1, PIO_2, TRACEDATA2,   USB_VBUS_DET,  None],
+/* GPIO 05 */ [None, SPI0_CSn, UART1_RX,  I2C0_SCL, PWM2_B, SIO, PIO_0, PIO_1, PIO_2, TRACEDATA3,   USB_VBUS_EN,   None],
+/* GPIO 06 */ [None, SPI0_SCK, UART1_CTS, I2C1_SDA, PWM3_A, SIO, PIO_0, PIO_1, PIO_2, None,         USB_OVCUR_DET, UART1_TX],
+/* GPIO 07 */ [None, SPI0_TX,  UART1_RTS, I2C1_SCL, PWM3_B, SIO, PIO_0, PIO_1, PIO_2, None,         USB_VBUS_DET,  UART1_RX],
+/* GPIO 08 */ [None, SPI1_RX,  UART1_TX,  I2C0_SDA, PWM4_A, SIO, PIO_0, PIO_1, PIO_2, QMI_CS1n,     USB_VBUS_EN,   None],
+/* GPIO 09 */ [None, SPI1_CSn, UART1_RX,  I2C0_SCL, PWM4_B, SIO, PIO_0, PIO_1, PIO_2, None,         USB_OVCUR_DET, None],
+/* GPIO 10 */ [None, SPI1_SCK, UART1_CTS, I2C1_SDA, PWM5_A, SIO, PIO_0, PIO_1, PIO_2, None,         USB_VBUS_DET,  UART1_TX],
+/* GPIO 11 */ [None, SPI1_TX,  UART1_RTS, I2C1_SCL, PWM5_B, SIO, PIO_0, PIO_1, PIO_2, None,         USB_VBUS_EN,   UART1_RX],
+/* GPIO 12 */ [HSTX, SPI1_RX,  UART0_TX,  I2C0_SDA, PWM6_A, SIO, PIO_0, PIO_1, PIO_2, CLOCK_GPINO,  USB_OVCUR_DET, None],
+/* GPIO 13 */ [HSTX, SPI1_CSn, UART0_RX,  I2C0_SCL, PWM6_B, SIO, PIO_0, PIO_1, PIO_2, CLOCK_GPOUTO, USB_VBUS_DET,  None],
+/* GPIO 14 */ [HSTX, SPI1_SCK, UART0_CTS, I2C1_SDA, PWM7_A, SIO, PIO_0, PIO_1, PIO_2, CLOCK_GPIN1,  USB_VBUS_EN,   UART0_TX],
+/* GPIO 15 */ [HSTX, SPI1_TX,  UART0_RTS, I2C1_SCL, PWM7_B, SIO, PIO_0, PIO_1, PIO_2, CLOCK_GPOUT1, USB_OVCUR_DET, UART0_RX],
+/* GPIO 16 */ [HSTX, SPI0_RX,  UART0_TX,  I2C0_SDA, PWM0_A, SIO, PIO_0, PIO_1, PIO_2, None,         USB_VBUS_DET,  None],
+/* GPIO 17 */ [HSTX, SPI0_CSn, UART0_RX,  I2C0_SCL, PWM0_B, SIO, PIO_0, PIO_1, PIO_2, None,         USB_VBUS_EN,   None],
+/* GPIO 18 */ [HSTX, SPI0_SCK, UART0_CTS, I2C1_SDA, PWM1_A, SIO, PIO_0, PIO_1, PIO_2, None,         USB_OVCUR_DET, UART0_TX],
+/* GPIO 19 */ [HSTX, SPI0_TX,  UART0_RTS, I2C1_SCL, PWM1_B, SIO, PIO_0, PIO_1, PIO_2, QMI_CS1n,     USB_VBUS_DET,  UART0_RX],
+/* GPIO 20 */ [None, SPI0_RX,  UART1_TX,  I2C0_SDA, PWM2_A, SIO, PIO_0, PIO_1, PIO_2, CLOCK_GPINO,  USB_VBUS_EN,   None],
+/* GPIO 21 */ [None, SPI0_CSn, UART1_RX,  I2C0_SCL, PWM2_B, SIO, PIO_0, PIO_1, PIO_2, CLOCK_GPOUTO, USB_OVCUR_DET, None],
+/* GPIO 22 */ [None, SPI0_SCK, UART1_CTS, I2C1_SDA, PWM3_A, SIO, PIO_0, PIO_1, PIO_2, CLOCK_GPIN1,  USB_VBUS_DET,  UART1_TX],
+/* GPIO 23 */ [None, SPI0_TX,  UART1_RTS, I2C1_SCL, PWM3_B, SIO, PIO_0, PIO_1, PIO_2, CLOCK_GPOUT1, USB_VBUS_EN,   UART1_RX],
+/* GPIO 24 */ [None, SPI1_RX,  UART1_TX,  I2C0_SDA, PWM4_A, SIO, PIO_0, PIO_1, PIO_2, CLOCK_GPOUT2, USB_OVCUR_DET, None],
+/* GPIO 25 */ [None, SPI1_CSn, UART1_RX,  I2C0_SCL, PWM4_B, SIO, PIO_0, PIO_1, PIO_2, CLOCK_GPOUT3, USB_VBUS_DET,  None],
+/* GPIO 26 */ [None, SPI1_SCK, UART1_CTS, I2C1_SDA, PWM5_A, SIO, PIO_0, PIO_1, PIO_2, None,         USB_VBUS_EN,   UART1_TX],
+/* GPIO 27 */ [None, SPI1_TX,  UART1_RTS, I2C1_SCL, PWM5_B, SIO, PIO_0, PIO_1, PIO_2, None,         USB_OVCUR_DET, UART1_RX],
+/* GPIO 28 */ [None, SPI1_RX,  UART0_TX,  I2C0_SDA, PWM6_A, SIO, PIO_0, PIO_1, PIO_2, None,         USB_VBUS_DET,  None],
+/* GPIO 29 */ [None, SPI1_CSn, UART0_RX,  I2C0_SCL, PWM6_B, SIO, PIO_0, PIO_1, PIO_2, None,         USB_VBUS_EN,   None],
+];

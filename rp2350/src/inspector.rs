@@ -1,7 +1,12 @@
 use std::rc::Rc;
 
+use crate::clock::EventType;
+
 #[derive(Debug, Clone)]
 pub enum InspectionEvent {
+    ClockEventActivated(EventType),
+    ClockEventScheduled(EventType),
+    ClockEventCanceled(EventType),
     TrngGenerated(u32),
     ExecutedInstruction {
         core: u8,
@@ -15,11 +20,17 @@ pub enum InspectionEvent {
         exception: u32,
     },
 
-    Tick(u8),
+    TickCore(u8),
     WakeCore(u8),
 
-    UartTx(u8),
-    UartRx(u16),
+    UartTx {
+        uart_index: u8,
+        value: u8,
+    },
+    UartRx {
+        uart_index: u8,
+        value: u16,
+    },
 }
 
 pub trait Inspector {
@@ -34,7 +45,7 @@ pub struct InspectorRef {
 impl Default for InspectorRef {
     fn default() -> Self {
         Self {
-            inspector: Rc::new(DummyInspector),
+            inspector: Rc::new(LoggerInspector),
         }
     }
 }
@@ -50,16 +61,25 @@ impl InspectorRef {
         self.inspector = inspector;
     }
 
-    pub fn raise(&self, event: InspectionEvent) {
+    pub fn emit(&self, event: InspectionEvent) {
         self.inspector.handle_event(event);
     }
 }
 
-pub struct DummyInspector;
+pub struct LoggerInspector;
 
-impl Inspector for DummyInspector {
+impl Inspector for LoggerInspector {
     fn handle_event(&self, event: InspectionEvent) {
         match event {
+            InspectionEvent::ClockEventActivated(typ) => {
+                log::info!("Clock event activated: {typ:?}");
+            }
+            InspectionEvent::ClockEventScheduled(typ) => {
+                log::info!("Clock event scheduled: {typ:?}");
+            }
+            InspectionEvent::ClockEventCanceled(typ) => {
+                log::info!("Clock event canceled: {typ:?}");
+            }
             InspectionEvent::TrngGenerated(value) => {
                 log::info!("RNG: generated value: {value}");
             }
@@ -81,19 +101,19 @@ impl Inspector for DummyInspector {
                 );
             }
 
-            InspectionEvent::Tick(core) => {
+            InspectionEvent::TickCore(core) => {
                 log::info!("Core {core}: Tick event");
             }
             InspectionEvent::WakeCore(core) => {
                 log::info!("Core {core}: Wake event");
             }
 
-            InspectionEvent::UartTx(core) => {
-                log::info!("Core {core}: UART TX event");
+            InspectionEvent::UartTx { uart_index, value } => {
+                log::info!("UART TX event on UART {uart_index}: {value}");
             }
 
-            InspectionEvent::UartRx(value) => {
-                log::info!("UART RX event: {value}");
+            InspectionEvent::UartRx { uart_index, value } => {
+                log::info!("UART RX event on UART {uart_index}: {value}");
             }
         }
     }

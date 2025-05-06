@@ -1,6 +1,5 @@
 use super::CpuArchitecture;
 use super::ProcessorContext;
-use super::Stats;
 
 #[derive(Default)]
 pub struct CortexM33 {
@@ -8,7 +7,7 @@ pub struct CortexM33 {
 }
 
 impl CpuArchitecture for CortexM33 {
-    fn set_core_id(&mut self, core_id: u8) {
+    fn set_core_id(&mut self, _core_id: u8) {
         todo!()
     }
 
@@ -16,11 +15,11 @@ impl CpuArchitecture for CortexM33 {
         todo!()
     }
 
-    fn set_pc(&mut self, value: u32) {
+    fn set_pc(&mut self, _value: u32) {
         todo!()
     }
 
-    fn tick(&mut self, ctx: &mut ProcessorContext) {
+    fn tick(&mut self, _ctx: &mut ProcessorContext) {
         todo!()
     }
 
@@ -32,7 +31,7 @@ impl CpuArchitecture for CortexM33 {
         todo!()
     }
 
-    fn stats(&self) -> &Stats {
+    fn set_sp(&mut self, _value: u32) {
         todo!()
     }
 }

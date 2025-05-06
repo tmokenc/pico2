@@ -27,16 +27,13 @@ impl Default for Rp2350 {
 
 impl Rp2350 {
     pub fn new() -> Self {
-        let gpio = Rc::new(RefCell::new(GpioController::default()));
         let interrupts = Rc::new(RefCell::new(Interrupts::default()));
+        let gpio = Rc::new(RefCell::new(GpioController::new(interrupts.clone())));
         let clock = Rc::new(Clock::new());
 
         let mut processor = [Rp2350Core::new(), Rp2350Core::new()];
         processor[0].set_core_id(0);
         processor[1].set_core_id(1);
-
-        // By default the second core is sleeping
-        processor[1].sleep();
 
         let inspector = InspectorRef::default();
         let bus = Bus::new(
@@ -56,6 +53,18 @@ impl Rp2350 {
             interrupts,
             gpio,
         }
+    }
+
+    pub fn reset(&mut self) {
+        self.bus.reset();
+        self.processor[0] = Rp2350Core::new();
+        self.processor[1] = Rp2350Core::new();
+        self.processor[0].set_core_id(0);
+        self.processor[1].set_core_id(1);
+        self.gpio.borrow_mut().reset();
+        self.interrupts.borrow_mut().reset();
+
+        self.skip_bootrom();
     }
 
     pub fn set_inspector(&mut self, inspector: Rc<dyn crate::inspector::Inspector>) {
@@ -109,13 +118,13 @@ impl Rp2350 {
             wake_opposite_core: false,
         };
 
-        self.inspector.raise(InspectionEvent::Tick(0));
+        self.inspector.emit(InspectionEvent::TickCore(0));
         self.processor[0].tick(&mut ctx);
 
         let wake_core_1 = ctx.wake_opposite_core;
         ctx.wake_opposite_core = false;
 
-        self.inspector.raise(InspectionEvent::Tick(1));
+        self.inspector.emit(InspectionEvent::TickCore(1));
         self.processor[1].tick(&mut ctx);
         let wake_core_0 = ctx.wake_opposite_core;
 
@@ -123,13 +132,23 @@ impl Rp2350 {
 
         // only wake after both cores have ticked
         if wake_core_1 {
-            self.inspector.raise(InspectionEvent::WakeCore(1));
+            self.inspector.emit(InspectionEvent::WakeCore(1));
             self.processor[1].wake();
         }
 
         if wake_core_0 {
-            self.inspector.raise(InspectionEvent::WakeCore(0));
+            self.inspector.emit(InspectionEvent::WakeCore(0));
             self.processor[0].wake();
         }
+    }
+
+    pub fn skip_bootrom(&mut self) {
+        // self.processor[0].set_pc(0x1000_0086);
+        // self.processor[1].set_pc(0x1000_0086);
+        self.processor[0].set_pc(0x1000_008a);
+        self.processor[1].set_pc(0x1000_008a);
+        self.processor[0].set_sp(0x2008_0000); // SRAM4
+        self.processor[1].set_sp(0x2008_1000); // SRAM5
+        self.processor[1].sleep();
     }
 }

@@ -201,15 +201,19 @@ impl Peripheral for Rc<RefCell<Pwm>> {
             }
             IRQ0_INTE => {
                 pwm.interrupts_mask[0] = (value as u16) & 0x0FFF;
+                pwm.update_interrupt(ctx.interrupts.clone());
             }
             IRQ0_INTF => {
                 pwm.interrupts_forced[0] = (value as u16) & 0x0FFF;
+                pwm.update_interrupt(ctx.interrupts.clone());
             }
             IRQ1_INTE => {
                 pwm.interrupts_mask[1] = (value as u16) & 0x0FFF;
+                pwm.update_interrupt(ctx.interrupts.clone());
             }
             IRQ1_INTF => {
                 pwm.interrupts_forced[1] = (value as u16) & 0x0FFF;
+                pwm.update_interrupt(ctx.interrupts.clone());
             }
 
             IRQ0_INTS | IRQ1_INTS => { /* Read only */ }

@@ -132,7 +132,7 @@ impl<const IDX: usize> Uart<IDX> {
         // TODO
     }
 
-    fn set_busy(&mut self, busy: bool) {
+    pub fn set_busy(&mut self, busy: bool) {
         if busy {
             self.flags |= FLAG_BUSY;
         } else {
@@ -140,7 +140,7 @@ impl<const IDX: usize> Uart<IDX> {
         }
     }
 
-    fn get_baudrate(&self) -> u32 {
+    pub fn get_baudrate(&self) -> u32 {
         let baudrate = (self.baud_divint as u32 * 16 + self.baud_divfrac as u32) * 1000;
         baudrate
     }
@@ -149,7 +149,7 @@ impl<const IDX: usize> Uart<IDX> {
         Duration::from_secs(1) / self.get_baudrate()
     }
 
-    fn fifo_level(&self, level: u8) -> u8 {
+    pub fn fifo_level(&self, level: u8) -> u8 {
         match level {
             0b000 => (FIFO_DEPTH as u8 / 8) * 1,
             0b001 => (FIFO_DEPTH as u8 / 4) * 1,
@@ -160,43 +160,43 @@ impl<const IDX: usize> Uart<IDX> {
         }
     }
 
-    fn transmit_interrupt_fifo_level(&self) -> u8 {
+    pub fn transmit_interrupt_fifo_level(&self) -> u8 {
         self.fifo_level(extract_bits(self.line_ctrl, 0..=2))
     }
 
-    fn receive_interrupt_fifo_level(&self) -> u8 {
+    pub fn receive_interrupt_fifo_level(&self) -> u8 {
         self.fifo_level(extract_bits(self.line_ctrl, 3..=5))
     }
 
-    fn dma_tx_enabled(&self) -> bool {
+    pub fn dma_tx_enabled(&self) -> bool {
         extract_bit(self.dma_ctrl, 1) != 0
     }
 
-    fn dma_rx_enabled(&self) -> bool {
+    pub fn dma_rx_enabled(&self) -> bool {
         extract_bit(self.dma_ctrl, 0) != 0
     }
 
-    fn dma_on_err(&self) -> bool {
+    pub fn dma_on_err(&self) -> bool {
         extract_bit(self.dma_ctrl, 2) != 0
     }
 
-    fn is_enabled(&self) -> bool {
+    pub fn is_enabled(&self) -> bool {
         extract_bit(self.ctrl, 0) != 0
     }
 
-    fn is_transmit_enabled(&self) -> bool {
+    pub fn is_transmit_enabled(&self) -> bool {
         extract_bit(self.ctrl, 8) != 0
     }
 
-    fn is_receive_enabled(&self) -> bool {
+    pub fn is_receive_enabled(&self) -> bool {
         extract_bit(self.ctrl, 9) != 0
     }
 
-    fn is_fifo_enabled(&self) -> bool {
+    pub fn is_fifo_enabled(&self) -> bool {
         extract_bit(self.ctrl, 4) != 0
     }
 
-    fn word_len(&self) -> u8 {
+    pub fn word_len(&self) -> u8 {
         match extract_bits(self.line_ctrl, 5..=6) {
             0b00 => 5,
             0b01 => 6,
@@ -218,7 +218,7 @@ impl<const IDX: usize> Uart<IDX> {
         extract_bit(self.line_ctrl, 3) != 0
     }
 
-    fn stick_parity(&self) -> bool {
+    pub fn stick_parity(&self) -> bool {
         extract_bit(self.line_ctrl, 7) != 0
     }
 

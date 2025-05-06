@@ -252,14 +252,12 @@ pub(super) fn start_timer<const IDX: usize>(
     });
 }
 
-fn reschedule_timer_tick<const IDX: usize>(
+pub fn reschedule_timer_tick<const IDX: usize>(
     timer_ref: Rc<RefCell<Timer<IDX>>>,
     clock: Rc<Clock>,
     interrupts_ref: Rc<RefCell<Interrupts>>,
 ) {
-    dbg!("Hi");
     if clock.is_scheduled(EventType::Timer(IDX)) {
-        dbg!("Hi2");
         // Cancel the scheduled event
         clock.cancel(EventType::Timer(IDX));
     }

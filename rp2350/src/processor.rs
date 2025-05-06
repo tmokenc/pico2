@@ -1,13 +1,11 @@
 pub mod cortex_m33;
 pub mod hazard3;
-pub mod stats;
 
 use crate::bus::Bus;
-use crate::interrupts::{Interrupt, Interrupts};
+use crate::interrupts::Interrupts;
 use crate::InspectorRef;
 pub use cortex_m33::CortexM33;
 pub use hazard3::Hazard3;
-pub use stats::Stats;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -22,11 +20,11 @@ pub trait CpuArchitecture {
     fn set_core_id(&mut self, core_id: u8);
     fn get_pc(&self) -> u32;
     fn set_pc(&mut self, value: u32);
+    fn set_sp(&mut self, value: u32);
     // fn set_irq(&mut self, irq: Interrupt);
     fn tick(&mut self, ctx: &mut ProcessorContext);
     fn sleep(&mut self);
     fn wake(&mut self);
-    fn stats(&self) -> &Stats;
 }
 
 pub enum Rp2350Core {
@@ -64,6 +62,20 @@ impl Rp2350Core {
         match self {
             Self::Arm(core) => core.wake(),
             Self::RiscV(core) => core.wake(),
+        }
+    }
+
+    pub fn set_pc(&mut self, value: u32) {
+        match self {
+            Self::Arm(core) => core.set_pc(value),
+            Self::RiscV(core) => core.set_pc(value),
+        }
+    }
+
+    pub fn set_sp(&mut self, value: u32) {
+        match self {
+            Self::Arm(core) => core.set_sp(value),
+            Self::RiscV(core) => core.set_sp(value),
         }
     }
 }

@@ -77,8 +77,7 @@ impl Peripheral for Trng {
             EHR_DATA0..=EHR_DATA5 => {
                 // simulating the rng entropy by generate it when needed
                 let value = getrandom::u32().unwrap_or_default();
-                ctx.inspector
-                    .handle_event(InspectionEvent::TrngGenerated(value));
+                ctx.inspector.emit(InspectionEvent::TrngGenerated(value));
                 value
 
                 // The below is implementation according to the datasheet

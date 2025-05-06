@@ -1,7 +1,13 @@
+/**
+ * @file peripherals.rs
+ * @author Nguyen Le Duy
+ * @date 02/01/2025
+ * @brief Peripheral module for the RP2350
+ */
 use crate::clock::Clock;
 use crate::gpio::GpioController;
 use crate::interrupts::Interrupts;
-use crate::{common::*, Inspector, InspectorRef};
+use crate::{common::*, InspectorRef};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -10,7 +16,9 @@ pub mod busctrl;
 pub mod clocks;
 pub mod dma;
 pub mod i2c;
+pub mod io;
 pub mod otp;
+pub mod pads;
 pub mod pwm;
 pub mod reset;
 pub mod sha256;
@@ -25,7 +33,9 @@ pub use busctrl::BusCtrl;
 pub use clocks::Clocks;
 pub use dma::Dma;
 pub use i2c::I2c;
+pub use io::IoBank0;
 pub use otp::Otp;
+pub use pads::PadsBank0;
 pub use pwm::Pwm;
 pub use reset::Reset;
 pub use sha256::Sha256;
@@ -43,9 +53,9 @@ pub struct Peripherals {
     pub clocks: Clocks,
     pub psm: UnimplementedPeripheral,
     pub resets: Reset,
-    pub io_bank0: UnimplementedPeripheral,
+    pub io_bank0: IoBank0,
     pub io_qspi: UnimplementedPeripheral,
-    pub pads_bank0: UnimplementedPeripheral,
+    pub pads_bank0: PadsBank0,
     pub pads_qspi: UnimplementedPeripheral,
     pub xosc: UnimplementedPeripheral,
     pub pll_sys: UnimplementedPeripheral,
@@ -156,10 +166,33 @@ impl Peripherals {
     }
 
     pub fn reset(&mut self) {
-        let Self { watch_dog, .. } = core::mem::take(self);
+        let Self {
+            watch_dog,
+            clock,
+            gpio,
+            interrupts,
+            inspector,
+            ..
+        } = core::mem::take(self);
 
         self.watch_dog = watch_dog;
+        self.clock = clock;
+        self.gpio = gpio;
+        self.interrupts = interrupts;
+        self.inspector = inspector;
         self.watch_dog.reset();
+
+        timer::reschedule_timer_tick(
+            self.timer0.clone(),
+            self.clock.clone(),
+            self.interrupts.clone(),
+        );
+
+        timer::reschedule_timer_tick(
+            self.timer1.clone(),
+            self.clock.clone(),
+            self.interrupts.clone(),
+        );
     }
 
     pub fn find_mut(&mut self, address: u32, requestor: Requestor) -> Option<&mut dyn Peripheral> {
@@ -382,7 +415,7 @@ pub trait Peripheral {
 pub struct UnimplementedPeripheral;
 
 impl Peripheral for UnimplementedPeripheral {
-    fn read(&self, address: u16, ctx: &PeripheralAccessContext) -> PeripheralResult<u32> {
+    fn read(&self, _address: u16, ctx: &PeripheralAccessContext) -> PeripheralResult<u32> {
         log::warn!(
             "Unimplemented peripheral read at address {:#X}",
             ctx.address
@@ -392,7 +425,7 @@ impl Peripheral for UnimplementedPeripheral {
 
     fn write_raw(
         &mut self,
-        address: u16,
+        _address: u16,
         value: u32,
         ctx: &PeripheralAccessContext,
     ) -> PeripheralResult<()> {

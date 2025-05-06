@@ -1,3 +1,9 @@
+/**
+ * @file peripherals/uart/receive.rs
+ * @author Nguyen Le Duy
+ * @date 23/04/2025
+ * @brief Receive state machine for UART
+ */
 use crate::clock::Clock;
 use crate::clock::EventType;
 use crate::gpio::FunctionSelect;
@@ -68,7 +74,7 @@ fn receive<const IDX: usize>(
     let mut gpio = gpio_ref.borrow_mut();
 
     if let Some(gpio_pin) = gpio.select(rx_gpio_func::<IDX>()) {
-        let bit = gpio_pin.value.is_high() as u8;
+        let bit = gpio_pin.input_value() as u8;
 
         match state {
             ReceiveState::StartReceiving => {
@@ -122,7 +128,10 @@ fn receive<const IDX: usize>(
                     uart.update_interrupt(interrupts.clone());
 
                     let data = data as u16 | (uart.error as u16) << 8;
-                    inspector.raise(InspectionEvent::UartRx(data));
+                    inspector.emit(InspectionEvent::UartRx {
+                        uart_index: IDX as u8,
+                        value: data,
+                    });
 
                     if let Err(_why) = uart.rx_fifo.push(data) {
                         uart.error |= OVERRUN_ERROR;

@@ -1,3 +1,10 @@
+/**
+ * @file peripherals/sio.rs
+ * @author Nguyen Le Duy
+ * @date 22/01/2025
+ * @brief SIO peripheral module for the RP2350
+ * @todo Timer
+ */
 use super::*;
 
 pub mod doorbell;
@@ -47,7 +54,6 @@ impl Sio {
     }
 
     fn update_gpio(&self, gpio: Rc<RefCell<GpioController>>, old_gpio_value: u32, old_gpio_output_enable: u32) {
-        let gpio = gpio.as_ref().borrow();
 
         let updated_pins = (self.gpio_value ^ old_gpio_value)
             | (self.gpio_output_enable ^ old_gpio_output_enable);
@@ -56,11 +62,7 @@ impl Sio {
             return
         }
 
-        for (i, pin) in gpio.pins.iter().enumerate() {
-            if (updated_pins & (1 << i)) != 0 {
-                // TODO
-            }
-        }
+        gpio.borrow_mut().update_sio(self.gpio_output_enable, self.gpio_value);
     }
 }
 
@@ -160,7 +162,7 @@ impl Peripheral for Sio {
                 let gpio = ctx.gpio.as_ref().borrow();
                 gpio.pins
                     .iter()
-                    .map(|pin| pin.value.is_high() as u32)
+                    .map(|pin| pin.input_value() as u32)
                     .rev()
                     .fold(0, |acc, value| (acc << 1) | value)
             }

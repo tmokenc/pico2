@@ -1086,6 +1086,7 @@ fn exec_compressed_instruction(code: u16, ctx: &mut ExecContext) {
         0b1010000000000001 => {
             ctx.inst_name("C.J");
             let offset = imm_cj(code);
+            ctx.write_register(0, ctx.get_pc() + 2);
             ctx.set_next_pc_offset(offset);
         }
         0b0100000000000001 => {
@@ -1239,7 +1240,9 @@ fn exec_compressed_instruction(code: u16, ctx: &mut ExecContext) {
             if rs2 == 0 {
                 ctx.inst_name("C.JR");
                 let new_pc = ctx.read_register(rs1) & !1; // clear LSB
+                println!("new_pc: {:#x}", new_pc);
                 ctx.set_absolute_pc_value(new_pc as u32);
+                ctx.write_register(0, ctx.get_pc() + 2);
             } else {
                 ctx.inst_name("C.MV");
                 let value = ctx.read_register(rs2);
@@ -1957,10 +1960,15 @@ mod tests {
         0b1010, 0b1010 => 0,
     ]);
 
+    aritmetic_test!(binv,, binvi, 0b01101000000000000001000000110011, [
+        0b1010, 0b1100 => 0b1000000001010,
+        0b1010, 0b111100 => (1 << 28) | 0b1010,
+        0b1010, 0b11 => 0b10,
+    ]);
+
     #[test]
     fn test_c_mv() {
         setup!(core, bus);
-        core.set_pc(PC);
 
         core.registers.write(11, 0xdeadbeefu32);
         let inst = 0b1000011000101110;
@@ -1968,4 +1976,208 @@ mod tests {
         exec_instruction(0b1000011000101110, &mut ctx);
         assert_eq!(ctx.register_write, Some((12, 0xdeadbeef)));
     }
+
+    #[test]
+    fn test_c_j() {
+        setup!(core, bus);
+
+        let inst1 = 0b1010100000100001; // c.j 24
+        let inst2 = 0b1010000000000001; // c.j 0
+        let inst3 = 0b1011111111111101; // c.j -2
+
+        let mut ctx = ExecContext::new(&mut core, &mut bus);
+        exec_instruction(inst1, &mut ctx);
+        assert_eq!(ctx.next_pc, PC + 24);
+        assert_eq!(ctx.register_write, Some((0, PC + 2)));
+
+        ctx = ExecContext::new(&mut core, &mut bus);
+        exec_instruction(inst2, &mut ctx);
+        assert_eq!(ctx.next_pc, PC);
+        assert_eq!(ctx.register_write, Some((0, PC + 2)));
+
+        ctx = ExecContext::new(&mut core, &mut bus);
+        exec_instruction(inst3, &mut ctx);
+        assert_eq!(ctx.next_pc, PC - 2);
+        assert_eq!(ctx.register_write, Some((0, PC + 2)));
+    }
+
+    #[test]
+    fn test_c_jr() {
+        setup!(core, bus);
+
+        let inst1 = 0b1000010000000010; // c.jr x8
+        let inst2 = 0b1000000010000010; // c.jr x1
+        let inst3 = 0b1000111110000010; // c.jr x31
+
+        core.registers.write(8, 0xabc);
+        core.registers.write(1, 0xdef);
+        core.registers.write(31, 0x123);
+
+        let mut ctx = ExecContext::new(&mut core, &mut bus);
+        exec_instruction(inst1, &mut ctx);
+        let target = 0xabc & !1;
+        assert_eq!(ctx.next_pc, target);
+        assert_eq!(ctx.register_write, Some((0, PC + 2)));
+
+        ctx = ExecContext::new(&mut core, &mut bus);
+        exec_instruction(inst2, &mut ctx);
+        let target = 0xdef & !1;
+        assert_eq!(ctx.next_pc, target);
+        assert_eq!(ctx.register_write, Some((0, PC + 2)));
+
+        ctx = ExecContext::new(&mut core, &mut bus);
+        exec_instruction(inst3, &mut ctx);
+        let target = 0x123 & !1;
+        assert_eq!(ctx.next_pc, target);
+        assert_eq!(ctx.register_write, Some((0, PC + 2)));
+    }
+
+    // #[test]
+    // fn test_c_jal() {
+    //     setup!(core, bus);
+    //     // TODO
+    // }
+
+    // #[test]
+    // fn test_c_jalr() {
+    //     setup!(core, bus);
+    //     // TODO
+    // }
+
+    // #[test]
+    // fn test_c_bnez() {
+    //     setup!(core, bus);
+    //     // TODO
+    // }
+
+    // #[test]
+    // fn test_c_addi() {
+    //     setup!(core, bus);
+    //     // TODO
+    // }
+
+    // #[test]
+    // fn test_c_addi4spn() {
+    //     setup!(core, bus);
+    //     // TODO
+    // }
+
+    // #[test]
+    // fn test_c_add() {
+    //     setup!(core, bus);
+    //     // TODO
+    // }
+
+    // #[test]
+    // fn test_c_sub() {
+    //     setup!(core, bus);
+    //     // TODO
+    // }
+
+    // #[test]
+    // fn test_c_lui() {
+    //     setup!(core, bus);
+    //     // TODO
+    // }
+
+    // #[test]
+    // fn test_c_andi() {
+    //     setup!(core, bus);
+    //     // TODO
+    // }
+
+    // #[test]
+    // fn test_c_slli() {
+    //     setup!(core, bus);
+    //     // let inst = 0x1000110a;
+
+    //     // core.registers.write(2, 0b1010);
+
+    //     // let mut ctx = ExecContext::new(&mut core, &mut bus);
+    //     // exec_instruction(inst, &mut ctx);
+    //     // assert_eq!(ctx.instruction_name, "C.SLLI");
+    //     // assert_eq!(ctx.register_write, Some((2, 0b1010 << 4)));
+    //     // TODO
+    // }
+
+    // #[test]
+    // fn test_h3_bextmi() {
+    //     setup!(core, bus);
+    //     // TODO
+    // }
+
+    // #[test]
+    // fn test_h3_bextm() {
+    //     setup!(core, bus);
+    //     // TODO
+    // }
+
+    // #[test]
+    // fn test_h3_block() {
+    //     setup!(core, bus);
+    //     // TODO
+    // }
+
+    // #[test]
+    // fn test_h3_unblock() {
+    //     setup!(core, bus);
+    //     // TODO
+    // }
+
+    // #[test]
+    // fn test_pack() {
+    //     setup!(core, bus);
+    //     // TODO
+    // }
+
+    // #[test]
+    // fn test_packh() {
+    //     setup!(core, bus);
+    //     // TODO
+    // }
+
+    // #[test]
+    // fn test_sh1add() {
+    //     setup!(core, bus);
+    //     // TODO
+    // }
+
+    // #[test]
+    // fn test_sh2add() {
+    //     setup!(core, bus);
+    //     // TODO
+    // }
+
+    // #[test]
+    // fn test_sh3add() {
+    //     setup!(core, bus);
+    //     // TODO
+    // }
+
+    // #[test]
+    // fn test_brev8() {
+    //     setup!(core, bus);
+    //     // TODO
+    // }
+
+    // #[test]
+    // fn test_brev() {
+    //     setup!(core, bus);
+    //     // TODO
+    // }
+
+    // TODO
+    // CSRRW
+    // CSRRS
+    // BEXTI
+    // LW
+    // SW
+    // LB
+    // C.LI
+    // C.MV
+    // C.LBU
+    // C.SW
+    // C.LHU
+    // C.SWSP
+    // CM.PUSH
 }

@@ -84,6 +84,11 @@ impl Interrupts {
     // Core local interrupts are located from 21th to 29th bits
     const CORE_LOCAL_IRQS_MASK: u64 = 0x1FF << 21;
 
+    pub fn reset(&mut self) {
+        self.global = 0;
+        self.core1 = 0;
+    }
+
     /// Enable the IRQ for the given core
     pub fn set_irq(&mut self, irq: Interrupt, value: bool) {
         if value {

@@ -1,3 +1,9 @@
+/**
+ * @file peripherals/uart/transmit.rs
+ * @author Nguyen Le Duy
+ * @date 23/04/2025
+ * @brief Transmit state machine for UART
+ */
 use super::{get_even_parity, get_odd_parity, Uart};
 use crate::clock::{Clock, EventType};
 use crate::gpio::{FunctionSelect, GpioController};
@@ -67,7 +73,10 @@ fn transmit<const IDX: usize>(
                     uart.update_interrupt(interrupts);
                 }
                 Some(value) => {
-                    inspector.raise(InspectionEvent::UartTx(value));
+                    inspector.emit(InspectionEvent::UartTx {
+                        uart_index: IDX as u8,
+                        value,
+                    });
                     uart.check_tx_fifo();
                     uart.set_busy(true);
                     drop(uart);
@@ -127,7 +136,7 @@ fn transmit<const IDX: usize>(
 
     gpio_ref
         .borrow_mut()
-        .set_by_func_sel(tx_gpio_func::<IDX>(), bit);
+        .set_pin_output(tx_gpio_func::<IDX>(), bit);
 
     clock
         .clone()

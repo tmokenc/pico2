@@ -156,6 +156,17 @@ impl Bus {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.sram = GenericMemory::default();
+        self.peripherals.reset();
+        self.dma_write_access = None;
+        self.dma_read_access = None;
+        self.core0_access = None;
+        self.core1_access = None;
+        self.core0_exclusive = None;
+        self.core1_exclusive = None;
+    }
+
     pub fn set_rom(&mut self, data: [u8; 32 * KB]) {
         self.rom = GenericMemory::new(&data);
     }
@@ -249,7 +260,7 @@ impl Bus {
         let result = match address & 0xF000_0000 {
             Self::ROM => self.rom.read_u32(address),
             Self::SRAM => self.sram.read_u32(address - Self::SRAM),
-            Self::XIP => self.flash.read_u32(address & 0x1FFF_FFFF),
+            Self::XIP => self.flash.read_u32(address & 0x0FFF_FFFF),
             _ => return Err(BusError::BusFault),
         };
 
