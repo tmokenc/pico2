@@ -1,14 +1,15 @@
-//! pico2
-//! Author: Nguyen Le Duy
-//! Date: 06/04/2025
-//! Description: Handling API for the pico2 project
-
+/**
+ * @file api.rs
+ * @author Nguyen Le Duy
+ * @date 14/04/2025
+ * @brief API module to communicate with the server
+ */
 use api_types::*;
 
 /// Represents the result of a compilation process.
-pub async fn compile(code: &str) -> Result<CompilationResponse, String> {
+pub async fn compile(lang: Language, code: &str) -> Result<CompilationResponse, String> {
     let compilation_request = CompilationRequest {
-        lang: Language::C,
+        lang,
         source: vec![SourceCode {
             filename: "main.c".to_string(),
             code: code.to_string(),

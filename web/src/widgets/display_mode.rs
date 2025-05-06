@@ -1,3 +1,9 @@
+/**
+ * @file: display_mode.rs
+ * @author: Nguyen Le Duy
+ * @date 31/03/2025
+ * @brief: Widget to display number in different formats
+ */
 use egui::{Label, RichText, Sense};
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]

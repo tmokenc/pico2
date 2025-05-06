@@ -1,3 +1,9 @@
+/**
+ * @file app/sram.rs
+ * @author Nguyen Le Duy
+ * @date 14/04/2025
+ * @brief View window for the SRAM
+ */
 use super::Rp2350Component;
 use rp2350::Rp2350;
 

@@ -1,6 +1,10 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
+//! @file main.rs
+//! @author Nguyen Le Duy
+//! @date 31/03/2025
+//! @brief Main entry point for the simulator
 
-use ::pico2::SimulatorApp;
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
+                                                                   // use ::pico2::SimulatorApp;
 
 // When compiling natively:
 #[cfg(not(target_arch = "wasm32"))]

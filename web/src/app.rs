@@ -1,3 +1,9 @@
+/**
+ * @file app.rs
+ * @author Nguyen Le Duy
+ * @date 04/05/2025
+ * @brief Main application for the simulator
+ */
 mod boot_ram;
 mod boot_rom;
 mod editor;
@@ -6,14 +12,17 @@ mod flash;
 mod processor_core;
 mod sha256;
 mod sram;
+mod timer;
+mod trng;
+mod uart;
 mod watchdog;
 
 use crate::simulator::TaskCommand;
+use crate::Tracker;
 use egui::collapsing_header::CollapsingState;
 use egui::{
     Button, Color32, ImageSource, Layout, Margin, ScrollArea, Theme, Ui, UiBuilder, Widget,
 };
-use egui_alignments::AlignedWidget;
 use egui_dock::{
     DockArea, DockState, NodeIndex, SurfaceIndex, TabDestination, TabInsert, TabViewer,
 };
@@ -25,10 +34,18 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 
+// View interface for each component of the simulator
 pub trait Rp2350Component: Default + serde::Serialize + serde::de::DeserializeOwned {
     const NAME: &'static str;
 
-    fn ui(&mut self, ui: &mut Ui, rp2350: &mut Rp2350);
+    fn ui(&mut self, ui: &mut Ui, _rp2350: &mut Rp2350) {
+        ui.heading(Self::NAME);
+        ui.label("todo");
+    }
+
+    fn ui_with_tracker(&mut self, ui: &mut Ui, rp2350: &mut Rp2350, _tracker: Rc<Tracker>) {
+        self.ui(ui, rp2350);
+    }
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Clone, Copy, PartialEq, Eq, Hash)]
@@ -45,15 +62,20 @@ pub enum Window {
     BootRom,
     Sram,
     BootRam,
-    Xip,
     Flash,
 
     // Peripherals
     WatchDog,
+    TRNG,
+    Timer0,
+    Timer1,
     Sha256,
-    Spi,
-    Uart,
-    I2c,
+    Spi0,
+    Spi1,
+    Uart0,
+    Uart1,
+    I2c0,
+    I2c1,
     Pwm,
     Dma,
 }
@@ -63,11 +85,13 @@ pub struct App {
     #[serde(skip)]
     open_windows: HashSet<Window>,
     #[serde(skip)]
-    is_running: bool,
+    is_running: Rc<RefCell<bool>>,
     #[serde(skip)]
     pico2: Rc<RefCell<Pico2>>,
     #[serde(skip)]
     send_task: Option<Sender<TaskCommand>>,
+    #[serde(skip)]
+    tracker: Rc<Tracker>,
 
     editor: editor::CodeEditor,
     // components
@@ -82,6 +106,13 @@ pub struct App {
     // peripherals
     watchdog: watchdog::WatchDog,
     sha256: sha256::Sha256,
+    trng: trng::Trng,
+    uart0: uart::Uart<0>,
+    uart1: uart::Uart<1>,
+    timer0: timer::Timer<0>,
+    timer1: timer::Timer<1>,
+    timer2: timer::Timer<2>,
+    timer3: timer::Timer<3>,
 }
 
 impl TabViewer for App {
@@ -97,12 +128,17 @@ impl TabViewer for App {
             Window::Sram => "SRAM",
             Window::BootRam => "Boot RAM",
             Window::Flash => "Flash",
-            Window::Xip => "XIP",
             Window::WatchDog => "Watch Dog",
             Window::Sha256 => "SHA-256",
-            Window::Spi => "SPI",
-            Window::Uart => "UART",
-            Window::I2c => "I2C",
+            Window::Spi0 => "SPI 0",
+            Window::Spi1 => "SPI 1",
+            Window::Uart0 => "UART 0",
+            Window::Uart1 => "UART 1",
+            Window::I2c0 => "I2C 0",
+            Window::I2c1 => "I2C 1",
+            Window::TRNG => "TRNG",
+            Window::Timer0 => "Timer 0",
+            Window::Timer1 => "Timer 1",
             Window::Pwm => "PWM",
             Window::Dma => "DMA",
         };
@@ -137,29 +173,34 @@ impl TabViewer for App {
                 let rp2350: &mut Rp2350 = &mut pico2.mcu;
 
                 match tab {
-                    Window::Editor => self.editor.ui(ui),
+                    Window::Editor => self.editor.ui(ui, self.send_task.as_mut().unwrap()),
                     Window::Field => self.field.ui(ui, rp2350),
-                    Window::Core0 => self.core0.ui(ui, rp2350),
-                    Window::Core1 => self.core1.ui(ui, rp2350),
+                    Window::Core0 => self.core0.ui_with_tracker(ui, rp2350, self.tracker.clone()),
+                    Window::Core1 => self.core1.ui_with_tracker(ui, rp2350, self.tracker.clone()),
                     Window::BootRom => self.boot_rom.ui(ui, rp2350),
                     Window::Sram => self.sram.ui(ui, rp2350),
                     Window::BootRam => self.boot_ram.ui(ui, rp2350),
                     Window::Flash => self.flash.ui(ui, rp2350),
-                    Window::Xip => {
-                        ui.heading("XIP");
-                        ui.label("todo");
-                    }
                     Window::WatchDog => self.watchdog.ui(ui, rp2350),
                     Window::Sha256 => self.sha256.ui(ui, rp2350),
-                    Window::Spi => {
+                    Window::TRNG => self.trng.ui_with_tracker(ui, rp2350, self.tracker.clone()),
+                    Window::Uart0 => self.uart0.ui_with_tracker(ui, rp2350, self.tracker.clone()),
+                    Window::Uart1 => self.uart1.ui_with_tracker(ui, rp2350, self.tracker.clone()),
+                    Window::Timer0 => self.timer0.ui(ui, rp2350),
+                    Window::Timer1 => self.timer1.ui(ui, rp2350),
+                    Window::Spi0 => {
                         ui.heading("SPI");
                         ui.label("todo");
                     }
-                    Window::Uart => {
-                        ui.heading("UART");
+                    Window::I2c0 => {
+                        ui.heading("I2C");
                         ui.label("todo");
                     }
-                    Window::I2c => {
+                    Window::Spi1 => {
+                        ui.heading("SPI");
+                        ui.label("todo");
+                    }
+                    Window::I2c1 => {
                         ui.heading("I2C");
                         ui.label("todo");
                     }
@@ -186,13 +227,18 @@ impl Window {
             Window::BootRom => "Boot ROM",
             Window::Sram => "SRAM",
             Window::BootRam => "Boot RAM",
-            Window::Xip => "XIP",
             Window::Flash => "Flash",
             Window::WatchDog => "Watch Dog",
             Window::Sha256 => "SHA-256",
-            Window::Spi => "SPI",
-            Window::Uart => "UART",
-            Window::I2c => "I2C",
+            Window::Spi0 => "SPI 0",
+            Window::Spi1 => "SPI 1",
+            Window::Uart0 => "UART 0",
+            Window::Uart1 => "UART 1",
+            Window::I2c0 => "I2C 0",
+            Window::I2c1 => "I2C 1",
+            Window::TRNG => "TRNG",
+            Window::Timer0 => "Timer 0",
+            Window::Timer1 => "Timer 1",
             Window::Pwm => "PWM",
             Window::Dma => "DMA",
         }
@@ -250,8 +296,15 @@ impl SimulatorApp {
             SimulatorApp::default()
         };
 
+        // Set the tracker to the app
+        app.app
+            .pico2
+            .borrow_mut()
+            .set_inspector(app.app.tracker.clone());
+
         let pico2 = Rc::clone(&app.app.pico2);
-        let sender = crate::simulator::run_pico2_sim(cc.egui_ctx.clone(), pico2);
+        let is_running = Rc::clone(&app.app.is_running);
+        let sender = crate::simulator::run_pico2_sim(cc.egui_ctx.clone(), pico2, is_running);
         app.app.send_task = Some(sender);
 
         return app;
@@ -267,24 +320,18 @@ impl SimulatorApp {
         if let Some(ref mut send_task) = self.app.send_task {
             let _ = send_task.try_send(TaskCommand::Run);
         }
-
-        self.app.is_running = true;
     }
 
     fn pause(&mut self) {
         if let Some(ref mut send_task) = self.app.send_task {
             let _ = send_task.try_send(TaskCommand::Pause);
         }
-
-        self.app.is_running = false;
     }
 
     fn stop(&mut self) {
         if let Some(ref mut send_task) = self.app.send_task {
             let _ = send_task.try_send(TaskCommand::Stop);
         }
-
-        self.app.is_running = false;
     }
 
     fn top_panel(&mut self, ui: &mut egui::Ui) {
@@ -327,47 +374,44 @@ impl SimulatorApp {
                 // TODO
             }
 
-            // only show these action with a flashed binary
-            if self.app.pico2.borrow().is_flashed {
+            ui.add_space(100.0);
+
+            if *self.app.is_running.borrow() {
+                if self
+                    .top_panel_button(egui::include_image!("../assets/pause.svg"), "Pause")
+                    .ui(ui)
+                    .clicked()
+                {
+                    self.pause();
+                }
+
                 ui.add_space(100.0);
 
-                if self.app.is_running {
-                    if self
-                        .top_panel_button(egui::include_image!("../assets/pause.svg"), "Pause")
-                        .ui(ui)
-                        .clicked()
-                    {
-                        self.pause();
-                    }
+                if self
+                    .top_panel_button(egui::include_image!("../assets/stop.svg"), "Stop")
+                    .ui(ui)
+                    .clicked()
+                {
+                    self.stop();
+                }
+            } else {
+                if self
+                    .top_panel_button(egui::include_image!("../assets/arrow-right.svg"), "Step")
+                    .ui(ui)
+                    .clicked()
+                {
+                    self.step();
+                }
 
-                    ui.add_space(100.0);
+                ui.add_space(100.0);
 
-                    if self
-                        .top_panel_button(egui::include_image!("../assets/stop.svg"), "Stop")
-                        .ui(ui)
-                        .clicked()
-                    {
-                        self.stop();
-                    }
-                } else {
-                    if self
-                        .top_panel_button(egui::include_image!("../assets/arrow-right.svg"), "Step")
-                        .ui(ui)
-                        .clicked()
-                    {
-                        self.step();
-                    }
-
-                    ui.add_space(100.0);
-
-                    if self
-                        .top_panel_button(egui::include_image!("../assets/play.svg"), "Run")
-                        .ui(ui)
-                        .clicked()
-                    {
-                        log::info!("Run clicked");
-                        self.run();
-                    }
+                if self
+                    .top_panel_button(egui::include_image!("../assets/play.svg"), "Run")
+                    .ui(ui)
+                    .clicked()
+                {
+                    log::info!("Run clicked");
+                    self.run();
                 }
             }
         });
@@ -398,7 +442,6 @@ impl SimulatorApp {
                         Window::Sram,
                         Window::BootRam,
                         Window::Flash,
-                        Window::Xip,
                     ],
                 );
 
@@ -407,11 +450,17 @@ impl SimulatorApp {
                     egui::include_image!("../assets/peripherals.svg"),
                     "Peripherals",
                     &[
-                        Window::Dma,
-                        Window::Spi,
-                        Window::Uart,
-                        Window::I2c,
                         Window::Pwm,
+                        Window::Uart0,
+                        Window::Uart1,
+                        Window::I2c0,
+                        Window::I2c1,
+                        Window::Spi0,
+                        Window::Spi1,
+                        Window::TRNG,
+                        Window::Dma,
+                        Window::Timer0,
+                        Window::Timer1,
                         Window::WatchDog,
                         Window::Sha256,
                     ],

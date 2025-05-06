@@ -1,3 +1,9 @@
+/**
+ * @file sha256.rs
+ * @author Nguyen Le Duy
+ * @date 04/05/2025
+ * @brief View window for the SHA-256 accelerator
+ */
 use super::Rp2350Component;
 use rp2350::Rp2350;
 

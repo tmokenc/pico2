@@ -1,3 +1,9 @@
+/**
+ * @file app/watchdog.rs
+ * @author Nguyen Le Duy
+ * @date 23/04/2025
+ * @brief View window for the WatchDog peripheral
+ */
 use super::Rp2350Component;
 use crate::widgets::DisplayMode;
 use rp2350::Rp2350;

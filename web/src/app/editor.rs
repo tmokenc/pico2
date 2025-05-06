@@ -1,61 +1,97 @@
-use crate::api;
-use egui::Color32;
-use rp2350::simulator::Pico2;
+use crate::simulator::TaskCommand;
+use api_types::Language;
+use egui::{Color32, ComboBox};
+use futures::channel::mpsc::Sender;
+
+struct Example {
+    name: &'static str,
+    code: &'static str,
+}
+
+const EXAMPLES: &[Example] = &[
+    Example {
+        name: "Blink",
+        code: include_str!("../../assets/examples/blink.c"),
+    },
+    Example {
+        name: "DMA",
+        code: include_str!("../../assets/examples/dma.c"),
+    },
+    Example {
+        name: "GPIO",
+        code: include_str!("../../assets/examples/gpio.c"),
+    },
+    Example {
+        name: "Multicore",
+        code: include_str!("../../assets/examples/multicore.c"),
+    },
+    Example {
+        name: "Multicore FIFO IRQ",
+        code: include_str!("../../assets/examples/multicore_fifo_irq.c"),
+    },
+    Example {
+        name: "PWM",
+        code: include_str!("../../assets/examples/pwm.c"),
+    },
+    Example {
+        name: "SPI",
+        code: include_str!("../../assets/examples/spi.c"),
+    },
+    Example {
+        name: "Timer",
+        code: include_str!("../../assets/examples/timer.c"),
+    },
+    Example {
+        name: "UART",
+        code: include_str!("../../assets/examples/uart.c"),
+    },
+    Example {
+        name: "Watchdog",
+        code: include_str!("../../assets/examples/watchdog.c"),
+    },
+];
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct CodeEditor {
-    pub language: String,
+    pub language: Language,
     pub code: String,
 }
 
 impl Default for CodeEditor {
     fn default() -> Self {
         Self {
-            language: "c".into(),
-            code: r#"// A very simple example\n\
-int main() {
-    return 0;
-}
-"#
-            .into(),
+            language: Language::C,
+            code: String::from(EXAMPLES[0].code),
         }
     }
 }
 
 impl CodeEditor {
-    async fn flash_compile_code(&self, pico2: &mut Pico2) {
-        let mut uf2: Vec<u8> = Vec::new();
-        match api::compile(&self.code).await {
-            Ok(_) => {}
-            Err(why) => {
-                // TODO
-            }
-        }
-
-        match pico2.flash_uf2(&uf2) {
-            Ok(_) => {
-                // TODO
-            }
-            Err(why) => {
-                // TODO
-            }
-        }
-    }
-
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, tx: &mut Sender<TaskCommand>) {
         let Self { language, code } = self;
 
-        ui.horizontal(|ui| {
-            ui.label("Language:");
-            ui.text_edit_singleline(language);
-        });
+        ComboBox::from_label("Language")
+            .selected_text(format!("{:?}", language))
+            .show_ui(ui, |ui| {
+                ui.selectable_value(language, Language::C, "C");
+                // Add more languages here if needed
+            });
+
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             ui.label("Syntax highlighting powered by ");
             ui.hyperlink_to("syntect", "https://github.com/trishume/syntect");
             ui.label(".");
         });
+
+        if ui
+            .button("Flash")
+            .on_hover_text("Flash the code to the Pico2")
+            .clicked()
+        {
+            let _ = tx.try_send(TaskCommand::FlashCode(language.clone(), code.clone()));
+        }
 
         let theme = egui_extras::syntax_highlighting::CodeTheme::from_memory(ui.ctx(), ui.style());
 
@@ -65,7 +101,7 @@ impl CodeEditor {
                 ui.style(),
                 &theme,
                 string,
-                language,
+                &format!("{:?}", language),
             );
             layout_job.wrap.max_width = wrap_width;
             ui.fonts(|f| f.layout_job(layout_job))

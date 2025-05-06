@@ -1,8 +1,9 @@
-//! File: memory_view.rs
-//! Author: Nguyen Le Duy
-//! Description: Memory view widget for the RP2350 emulator
-//! TODO Search functionality
-
+/**
+ * @file: memory_view.rs
+ * @author: Nguyen Le Duy
+ * @brief: Memory view widget for the RP2350 emulator
+ * TODO Search functionality
+ */
 use egui_extras::{Column, TableBuilder};
 use rp2350::memory::GenericMemory;
 

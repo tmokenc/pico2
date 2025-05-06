@@ -1,7 +1,17 @@
+/**
+ * @file app/processor_core.rs
+ * @author Nguyen Le Duy
+ * @date 14/05/2025
+ * @brief View window for the processor core
+ */
 use super::Rp2350Component;
+use crate::tracker::ProcessorTracker;
 use crate::widgets::DisplayMode;
+use egui::collapsing_header::CollapsingState;
 use egui::Margin;
 use egui::RichText;
+use egui_extras::Column;
+use egui_extras::TableBuilder;
 use rp2350::processor::cortex_m33::CortexM33;
 use rp2350::processor::hazard3::Registers as Hazard3Registers;
 use rp2350::processor::hazard3::{Hazard3, State as Hazard3State};
@@ -23,13 +33,26 @@ pub struct ProcessorCore<const T: usize> {
 impl<const T: usize> Rp2350Component for ProcessorCore<T> {
     const NAME: &'static str = name::<T>();
 
-    fn ui(&mut self, ui: &mut egui::Ui, rp2350: &mut Rp2350) {
+    fn ui_with_tracker(
+        &mut self,
+        ui: &mut egui::Ui,
+        rp2350: &mut Rp2350,
+        tracker: std::rc::Rc<crate::Tracker>,
+    ) {
         ui.heading(format!("Processor Core {}", T));
 
+        let track = tracker.borrow();
+        let ref processor_tracker = track.processor[T];
+
+        // Show processor details
         match rp2350.processor[T] {
             Rp2350Core::Arm(ref processor) => self.ui_arm(ui, processor),
-            Rp2350Core::RiscV(ref processor) => self.ui_riscv(ui, processor),
+            Rp2350Core::RiscV(ref processor) => self.ui_riscv(ui, processor, processor_tracker),
         }
+
+        // Show processor tracker
+        ui.add_space(12.0);
+        show_processor_tracker::<T>(ui, processor_tracker);
     }
 }
 
@@ -47,7 +70,7 @@ impl<const T: usize> ProcessorCore<T> {
         // TODO
     }
 
-    fn ui_riscv(&mut self, ui: &mut egui::Ui, hazard3: &Hazard3) {
+    fn ui_riscv(&mut self, ui: &mut egui::Ui, hazard3: &Hazard3, tracker: &ProcessorTracker) {
         egui::Grid::new("ProcessorInfo")
             .num_columns(2)
             .spacing([40.0, 6.0])
@@ -77,17 +100,17 @@ impl<const T: usize> ProcessorCore<T> {
                 });
                 ui.end_row();
 
-                let excecuted_inst = hazard3.csrs.minstret;
+                // let excecuted_inst = hazard3.csrs.minstret;
                 let executed_cycles = hazard3.csrs.mcycles;
 
                 ui.label("Executed");
-                ui.label(format!("{}", excecuted_inst));
+                ui.label(format!("{}", tracker.inst_count));
                 ui.end_row();
 
                 ui.label("IPC");
                 ui.label(format!(
                     "{}",
-                    (excecuted_inst as f64) / (executed_cycles as f64)
+                    (tracker.inst_count as f64) / (executed_cycles as f64)
                 ));
                 ui.end_row();
 
@@ -98,12 +121,20 @@ impl<const T: usize> ProcessorCore<T> {
 
         ui.add_space(12.0);
 
-        self.hazard3_registers_ui(ui, &hazard3.registers);
+        CollapsingState::load_with_default_open(
+            ui.ctx(),
+            ui.make_persistent_id(register_name::<T>()),
+            true,
+        )
+        .show_header(ui, |ui| {
+            ui.heading("Registers");
+        })
+        .body(|ui| {
+            self.hazard3_registers_ui(ui, &hazard3.registers);
+        });
     }
 
     fn hazard3_registers_ui(&mut self, ui: &mut egui::Ui, registers: &Hazard3Registers) {
-        ui.heading("Registers");
-
         // option to show with naming convention
         ui.checkbox(
             &mut self.show_with_naming_convention,
@@ -115,6 +146,14 @@ impl<const T: usize> ProcessorCore<T> {
             let value = registers.read(index);
             ui.add(register_ui(name, value, &mut reg_opt.display_mode));
         }
+    }
+}
+
+const fn register_name<const T: usize>() -> &'static str {
+    if T == 0 {
+        "ProcessorCore0Registers"
+    } else {
+        "ProcessorCore1Registers"
     }
 }
 
@@ -180,4 +219,109 @@ fn riscv_register_name(register: u8, with_convention: bool) -> String {
         31 => "t6".to_string(),
         _ => "unknown".to_string(),
     }
+}
+
+// Helper to get the ID for the collapsing header
+const fn tracker_name<const T: usize>() -> &'static str {
+    if T == 0 {
+        "ProcessorCore0Tracker"
+    } else {
+        "ProcessorCore1Tracker"
+    }
+}
+
+// Helper to get the ID for the collapsing header
+const fn log_name<const T: usize>() -> &'static str {
+    if T == 0 {
+        "ProcessorCore0Log"
+    } else {
+        "ProcessorCore1Log"
+    }
+}
+
+fn show_processor_tracker<const T: usize>(ui: &mut egui::Ui, tracker: &ProcessorTracker) {
+    CollapsingState::load_with_default_open(
+        ui.ctx(),
+        ui.make_persistent_id(tracker_name::<T>()),
+        false,
+    )
+    .show_header(ui, |ui| {
+        ui.heading("Last executed instructions");
+    })
+    .body(|ui| {
+        TableBuilder::new(ui)
+            .striped(true)
+            .resizable(true)
+            // .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+            .column(Column::exact(100.0))
+            .column(Column::exact(100.0))
+            .column(Column::exact(100.0))
+            .min_scrolled_height(200.0)
+            .max_scroll_height(200.0) // 10 rows
+            .header(20.0, |mut header| {
+                header.col(|ui| {
+                    ui.label(RichText::new("Name").strong());
+                });
+                header.col(|ui| {
+                    ui.label(RichText::new("Code").strong());
+                });
+                header.col(|ui| {
+                    ui.label(RichText::new("Address").strong());
+                });
+            })
+            .body(|body| {
+                body.rows(20.0, tracker.instruction_log.len(), |mut row| {
+                    let instruction = &tracker.instruction_log[row.index()];
+                    row.col(|ui| {
+                        ui.label(instruction.name);
+                    });
+                    row.col(|ui| {
+                        ui.label(format!("{:08x}", instruction.code));
+                    });
+                    row.col(|ui| {
+                        ui.label(format!("0x{:08x}", instruction.address));
+                    });
+                });
+            });
+    });
+
+    ui.add_space(12.0);
+
+    CollapsingState::load_with_default_open(
+        ui.ctx(),
+        ui.make_persistent_id(log_name::<T>()),
+        false,
+    )
+    .show_header(ui, |ui| {
+        ui.heading("Instruction count");
+    })
+    .body(|ui| {
+        TableBuilder::new(ui)
+            .striped(true)
+            .resizable(true)
+            // .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+            .column(Column::exact(100.0))
+            .column(Column::exact(50.0))
+            .min_scrolled_height(200.0)
+            .max_scroll_height(200.0) // 10 rows
+            .header(20.0, |mut header| {
+                header.col(|ui| {
+                    ui.label(RichText::new("Name").strong());
+                });
+                header.col(|ui| {
+                    ui.label(RichText::new("Count").strong());
+                });
+            })
+            .body(|body| {
+                body.rows(20.0, tracker.instruction_count.len(), |mut row| {
+                    let (name, count) = tracker.instruction_count.iter().nth(row.index()).unwrap();
+                    row.col(|ui| {
+                        ui.label(*name);
+                    });
+                    row.col(|ui| {
+                        ui.label(format!("{}", count));
+                    });
+                });
+            });
+    });
 }
