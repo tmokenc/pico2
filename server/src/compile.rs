@@ -57,8 +57,8 @@ impl Compiler {
         let build_dir = data_dir.join("build");
         let result_dir = data_dir.join("results");
 
-        if !has_dir(&self.result_dir).await? {
-            fs::create_dir(&self.result_dir).await?;
+        if !has_dir(&result_dir).await? {
+            fs::create_dir(&result_dir).await?;
         }
 
         let res = Self {
