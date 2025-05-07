@@ -172,7 +172,11 @@ impl TabViewer for App {
                 let rp2350: &mut Rp2350 = &mut pico2.mcu;
 
                 match tab {
-                    Window::Editor => self.editor.ui(ui, self.send_task.as_mut().unwrap()),
+                    Window::Editor => {
+                        drop(rp2350);
+                        drop(pico2); // avoid borrow checker issues
+                        self.editor.ui(ui, self.send_task.as_mut().unwrap());
+                    }
                     Window::Field => self.field.ui(ui, rp2350),
                     Window::Core0 => self.core0.ui_with_tracker(ui, rp2350, self.tracker.clone()),
                     Window::Core1 => self.core1.ui_with_tracker(ui, rp2350, self.tracker.clone()),
