@@ -69,8 +69,6 @@ impl Rp2350 {
         self.processor[1].set_core_id(1);
         self.gpio.borrow_mut().reset();
         self.interrupts.borrow_mut().reset();
-
-        self.skip_bootrom();
     }
 
     pub fn set_inspector(&mut self, inspector: Rc<dyn crate::inspector::Inspector>) {
@@ -127,6 +125,9 @@ impl Rp2350 {
         // This does not include from the uf2
         let data_section = include_bytes!("../data.bin");
         self.bus.set_sram(data_section);
+        self.reset();
+
+        self.inspector.emit(InspectionEvent::FlashedBinary);
 
         Ok(())
     }

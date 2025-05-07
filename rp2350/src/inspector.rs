@@ -50,6 +50,7 @@ pub enum InspectionEvent {
 
     TickCore(u8),
     WakeCore(u8),
+    FlashedBinary,
 
     UartTx {
         uart_index: u8,
@@ -159,6 +160,10 @@ impl Inspector for LoggerInspector {
                 address,
             } => {
                 log::info!("Bus Load: {requestor:?} {size:?} address: {address:#010x}");
+            }
+
+            InspectionEvent::FlashedBinary => {
+                log::info!("Flashed binary");
             }
 
             InspectionEvent::BusError {
