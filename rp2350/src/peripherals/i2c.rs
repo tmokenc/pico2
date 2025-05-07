@@ -6,7 +6,7 @@
  * @todo actually implement the I2C peripheral
  */
 use crate::interrupts::{Interrupt, Interrupts};
-use crate::utils::{extract_bit, set_bit, set_bit_state, Fifo};
+use crate::utils::{extract_bit, set_bit_state, Fifo};
 
 use super::{Peripheral, PeripheralAccessContext, PeripheralError, PeripheralResult};
 use std::cell::RefCell;

@@ -176,7 +176,7 @@ impl BusCtrl {
 }
 
 impl Peripheral for BusCtrl {
-    fn read(&self, addr: u16, ctx: &PeripheralAccessContext) -> PeripheralResult<u32> {
+    fn read(&self, addr: u16, _ctx: &PeripheralAccessContext) -> PeripheralResult<u32> {
         match addr & 0xFFF {
             0x00 => Ok(self.priority as u32),
             0x04 => Ok(1), // Priority Ack, rarely be 0
@@ -197,7 +197,7 @@ impl Peripheral for BusCtrl {
         &mut self,
         addr: u16,
         value: u32,
-        ctx: &PeripheralAccessContext,
+        _ctx: &PeripheralAccessContext,
     ) -> PeripheralResult<()> {
         match addr & 0xFFF {
             0x00 => self.priority = value,

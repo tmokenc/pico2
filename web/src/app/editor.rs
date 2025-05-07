@@ -10,6 +10,10 @@ pub struct Example {
 
 pub const EXAMPLES: &[Example] = &[
     Example {
+        name: "UART",
+        code: include_str!("../../assets/examples/uart.c"),
+    },
+    Example {
         name: "Blink",
         code: include_str!("../../assets/examples/blink.c"),
     },
@@ -40,10 +44,6 @@ pub const EXAMPLES: &[Example] = &[
     Example {
         name: "Timer",
         code: include_str!("../../assets/examples/timer.c"),
-    },
-    Example {
-        name: "UART",
-        code: include_str!("../../assets/examples/uart.c"),
     },
     Example {
         name: "Watchdog",

@@ -315,7 +315,7 @@ impl ExecContext<'_> {
     }
 
     fn add_zcmp_action(&mut self, action: ZcmpAction) {
-        self.zcmp_actions.push(action);
+        let _ = self.zcmp_actions.push(action);
     }
 
     fn zcmp_stack_push(&mut self, code: u16) {

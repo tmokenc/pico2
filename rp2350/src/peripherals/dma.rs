@@ -177,7 +177,7 @@ impl Dma {
             };
 
             if self.channels[idx].is_enabled() && self.channels[idx].busy() {
-                self.channel_round_robin.push(idx);
+                let _ = self.channel_round_robin.push(idx); // TODO correct???
 
                 if *self.channels[idx].ready_to_transfer.borrow() {
                     channel_idx = Some(idx);
@@ -210,7 +210,7 @@ impl Dma {
 
         match load_status {
             Ok(status) => {
-                self.fifo.push(FifoValue {
+                let _ = self.fifo.push(FifoValue {
                     value: Rc::clone(&status),
                     channel: channel_idx,
                 });
@@ -219,7 +219,7 @@ impl Dma {
                 channel.update_read_address();
             }
 
-            Err(why) => {
+            Err(_why) => {
                 // TODO
             }
         }
@@ -308,7 +308,7 @@ impl Dma {
                 }
             }
 
-            Err(why) => {
+            Err(_why) => {
                 // TODO
             }
         }

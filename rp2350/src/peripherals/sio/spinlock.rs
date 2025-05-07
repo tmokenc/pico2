@@ -51,7 +51,7 @@ mod tests {
 
     #[test]
     fn test_spinlock() {
-        let mut spinlock = SpinLock::default();
+        let spinlock = SpinLock::default();
 
         assert_eq!(spinlock.state(), 0);
 

@@ -88,7 +88,7 @@ async fn compile_source_code(lang: Language, code: &str) -> Result<Vec<u8>, Stri
     }
 }
 
-async fn flash_code(pico2: &mut Pico2, lang: Language, code: &str) {
+async fn flash_code(pico2: Rc<RefCell<Pico2>>, lang: Language, code: &str, skip_bootrom: bool) {
     // TODO add a loading spinner
     let uf2 = match compile_source_code(lang, code).await {
         Ok(uf2) => uf2,
@@ -98,10 +98,16 @@ async fn flash_code(pico2: &mut Pico2, lang: Language, code: &str) {
             return;
         }
     };
-    if let Err(why) = pico2.flash_uf2(&uf2) {
+
+    let mut mcu = pico2.borrow_mut();
+    if let Err(why) = mcu.flash_uf2(&uf2) {
         log::error!("Failed to flash uf2 file: {}", why);
         // TODO show error message in the UI
         return;
+    }
+
+    if skip_bootrom {
+        mcu.skip_bootrom();
     }
 
     // TODO add a message to the UI
@@ -155,11 +161,7 @@ pub fn run_pico2_sim(
                             Some(TaskCommand::Pause) => *is_running.borrow_mut() = false,
                             Some(TaskCommand::FlashCode(language, code, skip_bootrom)) => {
                                 *is_running.borrow_mut() = false;
-                                let mut mcu = pico2.borrow_mut();
-                                flash_code(&mut *mcu, language, &code).await;
-                                if skip_bootrom {
-                                    mcu.skip_bootrom();
-                                }
+                                flash_code(pico2.clone(), language, &code, skip_bootrom).await;
                             }
                             _ => {}
                         }
@@ -172,11 +174,7 @@ pub fn run_pico2_sim(
                     Some(TaskCommand::Stop) => pico2.borrow_mut().reset(),
                     Some(TaskCommand::Pause) => *is_running.borrow_mut() = false,
                     Some(TaskCommand::FlashCode(language, code, skip_bootrom)) => {
-                        let mut mcu = pico2.borrow_mut();
-                        flash_code(&mut *mcu, language, &code).await;
-                        if skip_bootrom {
-                            mcu.skip_bootrom();
-                        }
+                        flash_code(pico2.clone(), language, &code, skip_bootrom).await;
                     }
                     None => {}
                 }

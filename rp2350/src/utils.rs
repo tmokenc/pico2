@@ -6,7 +6,7 @@
  */
 pub mod fifo;
 
-pub use fifo::{Fifo, FifoError};
+pub use fifo::*;
 
 use num_traits::{AsPrimitive, PrimInt};
 

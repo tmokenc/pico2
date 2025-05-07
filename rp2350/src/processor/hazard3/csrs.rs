@@ -206,7 +206,7 @@ impl Csrs {
     const ARCHID: u32 = 0x0000001b;
     const IMPID: u32 = 0x86fc4e3f;
 
-    pub fn is_in_debug_mode(&self) -> bool {
+    pub(super) fn is_in_debug_mode(&self) -> bool {
         (self.dcsr & 0b1) != 0
     }
 
@@ -223,7 +223,7 @@ impl Csrs {
     }
 
     // Trap handle as described in the RP2350 in section 3.8.4
-    pub fn trap_handle(&mut self, trap: impl Into<Trap>, pc: u32) -> u32 {
+    pub(super) fn trap_handle(&mut self, trap: impl Into<Trap>, pc: u32) -> u32 {
         // 1. Save the address of the interrupted or excepting instruction to MEPC
         self.mepc = pc;
         // 2. Set the MSB of MCAUSE to indicate the cause is an interrupt, or clear it to indicate an exception
@@ -253,7 +253,7 @@ impl Csrs {
         }
     }
 
-    pub fn trap_mret(&mut self) -> u32 {
+    pub(super) fn trap_mret(&mut self) -> u32 {
         // 1. Restore core privilege level to the value of MSTATUS.MP
         self.privilege_mode = PrivilegeMode::from((self.mstatus >> 11) & 0b11);
 
@@ -288,8 +288,8 @@ impl Csrs {
         }
     }
 
-    pub fn set_trap(&mut self, trap: Trap) {
-        let mut cause = 0;
+    pub(super) fn set_trap(&mut self, trap: Trap) {
+        let mut cause;
 
         match trap {
             Trap::Exception(ex) => match ex {
@@ -312,7 +312,7 @@ impl Csrs {
         // Set the cause in the mcause register
         self.mcause = cause | (self.mcause & 0x8000_0000);
     }
-    pub fn read(&self, offset: u16) -> Result<u32, Exception> {
+    pub(super) fn read(&self, offset: u16) -> Result<u32, Exception> {
         log::info!("read csr: {:#x}", offset);
 
         let result = match offset {
@@ -638,7 +638,11 @@ impl Csrs {
     }
 
     // Check for interrupt and return the handling address if needed
-    pub(super) fn interrupt_check(&mut self, pc: u32, irq: Rc<RefCell<Interrupts>>) -> Option<u32> {
+    pub(super) fn interrupt_check(
+        &mut self,
+        _pc: u32,
+        _irq: Rc<RefCell<Interrupts>>,
+    ) -> Option<u32> {
         // TODO
         None
         // ux_t m_targeted_irqs = get_effective_xip() & mie;

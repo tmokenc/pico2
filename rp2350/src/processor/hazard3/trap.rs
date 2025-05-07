@@ -8,6 +8,7 @@ use crate::interrupts::*;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub(super) enum Exception {
+    #[allow(dead_code)] // with C extension enabled, this never happens
     InstructionAlignment = 0x0,
     InstructionFetchFault = 0x1,
     IllegalInstruction = 0x2,

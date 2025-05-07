@@ -168,12 +168,14 @@ impl TabViewer for App {
         egui::Frame::default()
             .inner_margin(Margin::same(10))
             .show(ui, |ui| {
-                let mut pico2 = self.pico2.as_ref().borrow_mut();
+                let Ok(mut pico2) = self.pico2.as_ref().try_borrow_mut() else {
+                    log::error!("Failed to borrow pico2");
+                    return;
+                };
                 let rp2350: &mut Rp2350 = &mut pico2.mcu;
 
                 match tab {
                     Window::Editor => {
-                        drop(rp2350);
                         drop(pico2); // avoid borrow checker issues
                         self.editor.ui(ui, self.send_task.as_mut().unwrap());
                     }
