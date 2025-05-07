@@ -11,7 +11,7 @@ targets = ["x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"]
 
 [dependencies]
 rp2350 = { path = "../rp2350" }
-egui = "0.31"
+egui = {version = "0.31", features = ["color-hex"] }
 eframe = { version = "0.31", default-features = false, features = [
     "accesskit",     # Make egui compatible with screen readers. NOTE: adds a lot of dependencies.
     "default_fonts", # Embed the default egui fonts.
@@ -19,6 +19,7 @@ eframe = { version = "0.31", default-features = false, features = [
     "persistence",   # Enable restoring app state when restarting the app.
     "wayland",       # To support Linux (and CI)
     "x11",     # To support Linux (and CI)
+    
 ] }
 log = "0.4"
 egui_dock = { version = "0.16", features = ["serde"] }
@@ -27,7 +28,7 @@ egui_dock = { version = "0.16", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 egui_extras = { version = "0.31", features = ["serde", "svg", "image", "all_loaders"] }
 image = { version = "*", features = ["webp"] }
-egui_alignments = {git = "https://github.com/a-littlebit/egui_alignments.git", rev = "91c1f4eb2f18ad894d025789d0da8cfb78ccde2e"} 
+egui_alignments = {git = "https://github.com/a-littlebit/egui_alignments.git", rev = "91c1f4eb2f18ad894d025789d0da8cfb78ccde2e"}
 futures = "0.3"
 web-time = "1"
 gloo = {version = "0.11", features = ["futures", "timers"]}
