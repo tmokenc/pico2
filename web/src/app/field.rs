@@ -1,11 +1,30 @@
+/**
+ * @file app/field.rs
+ * @author Nguyen Le Duy
+ * @date 07/05/2025
+ * @brief View schematic and field of Raspberry Pi Pico 2
+ */
 use super::Rp2350Component;
-use egui_alignments::AlignedWidget;
+use egui::Margin;
+use egui::RichText;
 use rp2350::gpio::*;
 use rp2350::Rp2350;
 
-#[derive(Default, serde::Deserialize, serde::Serialize)]
+#[derive(serde::Deserialize, serde::Serialize)]
 pub struct Field {
     show_schematic: bool,
+    scene_rect: egui::Rect,
+    schematic_rect: egui::Rect,
+}
+
+impl Default for Field {
+    fn default() -> Self {
+        Self {
+            show_schematic: false,
+            scene_rect: egui::Rect::ZERO,
+            schematic_rect: egui::Rect::ZERO,
+        }
+    }
 }
 
 impl Rp2350Component for Field {
@@ -30,64 +49,168 @@ impl Rp2350Component for Field {
 
 impl Field {
     fn schematic_ui(&mut self, ui: &mut egui::Ui) {
-        egui::Image::new(egui::include_image!("../../assets/pico2_schematic.webp"))
-            .alt_text("Raspberry Pi Pico 2 Schematic")
-            .maintain_aspect_ratio(true)
-            .max_height(500.0)
-            .fit_to_original_size(1.0)
-            .center(ui);
+        egui::Scene::new()
+            .zoom_range(0.1..=3.0)
+            .show(ui, &mut self.schematic_rect, |ui| {
+                ui.add(
+                    egui::Image::new(egui::include_image!("../../assets/pico2_schematic.webp"))
+                        .alt_text("Raspberry Pi Pico 2 Schematic")
+                        .maintain_aspect_ratio(true)
+                        .max_height(500.0)
+                        .fit_to_original_size(1.0),
+                )
+            });
     }
 
     fn field_ui(&mut self, ui: &mut egui::Ui, rp2350: &mut Rp2350) {
-        let img_res = egui::Image::new(egui::include_image!("../../assets/pico2.webp"))
-            .alt_text("Raspberry Pi Pico 2")
-            .maintain_aspect_ratio(true)
-            .max_height(500.0)
-            .fit_to_original_size(1.0)
-            .center(ui);
+        egui::Scene::new()
+            .zoom_range(0.1..=3.0)
+            .show(ui, &mut self.scene_rect, |ui| {
+                ui.horizontal(|ui| {
+                    let gpio = rp2350.gpio.borrow();
 
-        let gpio = rp2350.gpio.borrow();
-        for i in 0..30 {
-            let pin_state = gpio.pin_state(i);
-            pin_state_ui(ui, i, &pin_state);
-        }
-
-        // TODO
+                    draw_gpio_state(ui, &gpio, true);
+                    draw_raspberry_pi_pico2(ui, gpio.pin_state(25).is_high());
+                    draw_gpio_state(ui, &gpio, false);
+                });
+            });
     }
 }
 
-fn pin_state_ui(ui: &mut egui::Ui, index: u8, pin_state: &PinState) {
-    ui.label(format!("Pin {}: ", index));
-    match pin_state {
+#[rustfmt::skip]
+fn draw_gpio_state(ui: &mut egui::Ui, gpio: &GpioController, is_left: bool) {
+    ui.vertical(|ui| {
+        if is_left {
+            ui.add_visible(false, pin_state(PinState::Input(InputState::Floating), is_left)); // Dummy pin for alignment
+            ui.add(pin_state(gpio.pin_state(0), is_left));
+            ui.add(pin_state(gpio.pin_state(1), is_left));
+            ui.add_visible(false, pin_state(PinState::Input(InputState::Floating), is_left));
+            ui.add(pin_state(gpio.pin_state(2), is_left));
+            ui.add(pin_state(gpio.pin_state(3), is_left));
+            ui.add(pin_state(gpio.pin_state(4), is_left));
+            ui.add(pin_state(gpio.pin_state(5), is_left));
+            ui.add_visible(false, pin_state(PinState::Input(InputState::Floating), is_left));
+            ui.add(pin_state(gpio.pin_state(6), is_left));
+            ui.add(pin_state(gpio.pin_state(7), is_left));
+            ui.add(pin_state(gpio.pin_state(8), is_left));
+            ui.add(pin_state(gpio.pin_state(9), is_left));
+            ui.add_visible(false, pin_state(PinState::Input(InputState::Floating), is_left));
+            ui.add(pin_state(gpio.pin_state(10), is_left));
+            ui.add(pin_state(gpio.pin_state(11), is_left));
+            ui.add(pin_state(gpio.pin_state(12), is_left));
+            ui.add(pin_state(gpio.pin_state(13), is_left));
+            ui.add_visible(false, pin_state(PinState::Input(InputState::Floating), is_left));
+            ui.add(pin_state(gpio.pin_state(14), is_left));
+            ui.add(pin_state(gpio.pin_state(15), is_left));
+        } else {
+            ui.add_visible(false, pin_state(PinState::Input(InputState::Floating), is_left)); // Dummy pin for alignment
+            ui.add_visible(false, pin_state(PinState::Input(InputState::Floating), is_left));
+            ui.add_visible(false, pin_state(PinState::Input(InputState::Floating), is_left));
+            ui.add_visible(false, pin_state(PinState::Input(InputState::Floating), is_left));
+            ui.add_visible(false, pin_state(PinState::Input(InputState::Floating), is_left));
+            ui.add_visible(false, pin_state(PinState::Input(InputState::Floating), is_left));
+            ui.add_visible(false, pin_state(PinState::Input(InputState::Floating), is_left));
+            ui.add(pin_state(gpio.pin_state(28), is_left));
+            ui.add_visible(false, pin_state(PinState::Input(InputState::Floating), is_left));
+            ui.add(pin_state(gpio.pin_state(27), is_left));
+            ui.add(pin_state(gpio.pin_state(26), is_left));
+            ui.add_visible(false, pin_state(PinState::Input(InputState::Floating), is_left));
+            ui.add(pin_state(gpio.pin_state(22), is_left));
+            ui.add_visible(false, pin_state(PinState::Input(InputState::Floating), is_left));
+            ui.add(pin_state(gpio.pin_state(21), is_left));
+            ui.add(pin_state(gpio.pin_state(20), is_left));
+            ui.add(pin_state(gpio.pin_state(19), is_left));
+            ui.add(pin_state(gpio.pin_state(18), is_left));
+            ui.add_visible(false, pin_state(PinState::Input(InputState::Floating), is_left));
+            ui.add(pin_state(gpio.pin_state(17), is_left));
+            ui.add(pin_state(gpio.pin_state(16), is_left));
+        }
+    });
+}
+
+fn draw_raspberry_pi_pico2(ui: &mut egui::Ui, _led_on: bool) {
+    let _img_rect = ui
+        .add(
+            egui::Image::new(egui::include_image!("../../assets/pico2.webp"))
+                .alt_text("Raspberry Pi Pico 2")
+                .maintain_aspect_ratio(true)
+                .max_height(520.0)
+                .fit_to_original_size(1.0),
+        )
+        .rect;
+}
+
+fn pin_state(pin_state: PinState, is_left: bool) -> impl egui::Widget + 'static {
+    move |ui: &mut egui::Ui| match pin_state {
         PinState::Output(output_state, function_select) => {
             let text_out = match output_state {
-                OutputState::High => "High",
-                OutputState::Low => "Low",
+                OutputState::High => "HIGH",
+                OutputState::Low => "LOW ",
             };
 
             let text_func = format!("{:?}", function_select);
 
             ui.horizontal(|ui| {
-                ui.label(text_out);
-                ui.label(text_func);
-            });
-
-            // egui::Frame::new()
-            //     .corner_radius(10)
-            //     .inner_margin(Margin::symmetric(6, 4))
-            //     .fill(egui::Color32::from_rgb(0x00, 0x7f, 0x7f))
-            //     .show(ui, |ui| {
-            //         ui.monospace(RichText::new("RISC-V").strong().color(egui::Color32::WHITE));
-            //     });
+                if is_left {
+                    ui.add(pin_frame(text_out, egui::Color32::MAGENTA));
+                    ui.add(pin_frame(
+                        text_func,
+                        egui::Color32::from_hex("#151313").unwrap(),
+                    ));
+                } else {
+                    ui.add(pin_frame(
+                        text_func,
+                        egui::Color32::from_hex("#151313").unwrap(),
+                    ));
+                    ui.add(pin_frame(text_out, egui::Color32::MAGENTA));
+                }
+            })
+            .response
         }
         PinState::Input(input_state) => {
-            let color = match input_state {
-                InputState::PullUp => egui::Color32::from_black_alpha(0),
-                InputState::PullDown => egui::Color32::from_black_alpha(0),
-                InputState::Floating => egui::Color32::from_black_alpha(0),
-                InputState::BusKeeper => egui::Color32::from_black_alpha(0),
+            let state = match input_state {
+                InputState::PullUp => "  PULL UP ",
+                InputState::PullDown => " PULL DOWN",
+                InputState::Floating => " FLOATING ",
+                InputState::BusKeeper => "BUS KEEPER",
             };
-            ui.label(format!("{:?}", input_state));
+
+            ui.horizontal(|ui| {
+                if is_left {
+                    ui.add(pin_frame("IN", egui::Color32::from_hex("#4f56e9").unwrap()));
+                    ui.add(pin_frame(
+                        state,
+                        egui::Color32::from_hex("#151313").unwrap(),
+                    ));
+                } else {
+                    ui.add(pin_frame(
+                        state,
+                        egui::Color32::from_hex("#151313").unwrap(),
+                    ));
+                    ui.add(pin_frame("IN", egui::Color32::from_hex("#4f56e9").unwrap()));
+                }
+            })
+            .response
         }
+    }
+}
+
+fn pin_frame(
+    text: impl AsRef<str> + 'static,
+    background_color: egui::Color32,
+) -> impl egui::Widget + 'static {
+    move |ui: &mut egui::Ui| {
+        egui::Frame::new()
+            .inner_margin(Margin::symmetric(6, 4))
+            .outer_margin(Margin::symmetric(0, 0))
+            .fill(background_color)
+            .show(ui, |ui| {
+                ui.monospace(
+                    RichText::new(text.as_ref())
+                        .strong()
+                        .color(egui::Color32::WHITE),
+                );
+            })
+            .response
     }
 }
