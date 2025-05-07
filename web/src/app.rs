@@ -20,9 +20,7 @@ mod watchdog;
 use crate::simulator::TaskCommand;
 use crate::Tracker;
 use egui::collapsing_header::CollapsingState;
-use egui::{
-    Button, Color32, ImageSource, Layout, Margin, ScrollArea, Theme, Ui, UiBuilder, Widget,
-};
+use egui::{ComboBox, ImageSource, Layout, Margin, ScrollArea, Ui, UiBuilder, Widget};
 use egui_dock::{
     DockArea, DockState, NodeIndex, SurfaceIndex, TabDestination, TabInsert, TabViewer,
 };
@@ -93,6 +91,9 @@ pub struct App {
     #[serde(skip)]
     tracker: Rc<Tracker>,
 
+    #[serde(skip)]
+    example: usize,
+
     editor: editor::CodeEditor,
     // components
     core0: processor_core::ProcessorCore<0>,
@@ -111,8 +112,6 @@ pub struct App {
     uart1: uart::Uart<1>,
     timer0: timer::Timer<0>,
     timer1: timer::Timer<1>,
-    timer2: timer::Timer<2>,
-    timer3: timer::Timer<3>,
 }
 
 impl TabViewer for App {
@@ -353,7 +352,23 @@ impl SimulatorApp {
         }
 
         ui.horizontal(|ui| {
-            ui.add_space(200.0);
+            ComboBox::from_label("")
+                .selected_text(editor::EXAMPLES[self.app.example].name)
+                .show_ui(ui, |ui| {
+                    for (i, example) in editor::EXAMPLES.iter().enumerate() {
+                        ui.selectable_value(&mut self.app.example, i, example.name);
+                    }
+                });
+
+            if ui.button("Load Example").clicked() {
+                let example = &editor::EXAMPLES[self.app.example];
+                self.app.editor.code = String::from(example.code);
+                if let Some(tab) = self.dock_state.find_tab(&Window::Editor) {
+                    self.dock_state.set_active_tab(tab);
+                }
+            }
+
+            ui.add_space(50.0);
 
             if ui
                 .add(self.top_panel_button(egui::include_image!("../assets/import.svg"), "Import"))

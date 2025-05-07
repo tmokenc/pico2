@@ -5,7 +5,6 @@
  * @brief View window for the Timer peripheral
  */
 use super::Rp2350Component;
-use egui::{RichText, ScrollArea};
 use rp2350::peripherals::timer::CountSource;
 use rp2350::Rp2350;
 use std::cell::RefCell;

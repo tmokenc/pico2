@@ -68,7 +68,6 @@ impl Field {
             .show(ui, &mut self.scene_rect, |ui| {
                 ui.horizontal(|ui| {
                     let gpio = rp2350.gpio.borrow();
-
                     draw_gpio_state(ui, &gpio, true);
                     draw_raspberry_pi_pico2(ui, gpio.pin_state(25).is_high());
                     draw_gpio_state(ui, &gpio, false);
@@ -128,16 +127,18 @@ fn draw_gpio_state(ui: &mut egui::Ui, gpio: &GpioController, is_left: bool) {
     });
 }
 
-fn draw_raspberry_pi_pico2(ui: &mut egui::Ui, _led_on: bool) {
-    let _img_rect = ui
-        .add(
-            egui::Image::new(egui::include_image!("../../assets/pico2.webp"))
-                .alt_text("Raspberry Pi Pico 2")
-                .maintain_aspect_ratio(true)
-                .max_height(520.0)
-                .fit_to_original_size(1.0),
-        )
-        .rect;
+fn draw_raspberry_pi_pico2(ui: &mut egui::Ui, led_on: bool) {
+    const PICO2: egui::ImageSource<'_> = egui::include_image!("../../assets/pico2.webp");
+    const PICO2_LED_ON: egui::ImageSource<'_> =
+        egui::include_image!("../../assets/pico2_led_on.webp");
+
+    ui.add(
+        egui::Image::new(if led_on { PICO2_LED_ON } else { PICO2 })
+            .alt_text("Raspberry Pi Pico 2")
+            .maintain_aspect_ratio(true)
+            .max_height(520.0)
+            .fit_to_original_size(1.0),
+    );
 }
 
 fn pin_state(pin_state: PinState, is_left: bool) -> impl egui::Widget + 'static {
@@ -153,15 +154,9 @@ fn pin_state(pin_state: PinState, is_left: bool) -> impl egui::Widget + 'static 
             ui.horizontal(|ui| {
                 if is_left {
                     ui.add(pin_frame(text_out, egui::Color32::MAGENTA));
-                    ui.add(pin_frame(
-                        text_func,
-                        egui::Color32::from_hex("#151313").unwrap(),
-                    ));
+                    ui.add(pin_frame(text_func, egui::hex_color!("#151313")));
                 } else {
-                    ui.add(pin_frame(
-                        text_func,
-                        egui::Color32::from_hex("#151313").unwrap(),
-                    ));
+                    ui.add(pin_frame(text_func, egui::hex_color!("#151313")));
                     ui.add(pin_frame(text_out, egui::Color32::MAGENTA));
                 }
             })
@@ -177,17 +172,11 @@ fn pin_state(pin_state: PinState, is_left: bool) -> impl egui::Widget + 'static 
 
             ui.horizontal(|ui| {
                 if is_left {
-                    ui.add(pin_frame("IN", egui::Color32::from_hex("#4f56e9").unwrap()));
-                    ui.add(pin_frame(
-                        state,
-                        egui::Color32::from_hex("#151313").unwrap(),
-                    ));
+                    ui.add(pin_frame("IN", egui::hex_color!("#4f56e9")));
+                    ui.add(pin_frame(state, egui::hex_color!("#151313")));
                 } else {
-                    ui.add(pin_frame(
-                        state,
-                        egui::Color32::from_hex("#151313").unwrap(),
-                    ));
-                    ui.add(pin_frame("IN", egui::Color32::from_hex("#4f56e9").unwrap()));
+                    ui.add(pin_frame(state, egui::hex_color!("#151313")));
+                    ui.add(pin_frame("IN", egui::hex_color!("#4f56e9")));
                 }
             })
             .response

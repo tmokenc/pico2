@@ -108,6 +108,11 @@ impl Inspector for Tracker {
                 push_to_buffer(&mut uart.rx, value, uart.max_buffer_size);
             }
 
+            // reset the tracker
+            InspectionEvent::FlashedBinary => {
+                core::mem::take(&mut *inner);
+            }
+
             _ => {
                 // No action needed for other events
             }

@@ -1,14 +1,14 @@
 use crate::simulator::TaskCommand;
 use api_types::Language;
-use egui::{Color32, ComboBox};
+use egui::ComboBox;
 use futures::channel::mpsc::Sender;
 
-struct Example {
-    name: &'static str,
-    code: &'static str,
+pub struct Example {
+    pub name: &'static str,
+    pub code: &'static str,
 }
 
-const EXAMPLES: &[Example] = &[
+pub const EXAMPLES: &[Example] = &[
     Example {
         name: "Blink",
         code: include_str!("../../assets/examples/blink.c"),
@@ -56,6 +56,7 @@ const EXAMPLES: &[Example] = &[
 pub struct CodeEditor {
     pub language: Language,
     pub code: String,
+    pub skip_bootrom: bool,
 }
 
 impl Default for CodeEditor {
@@ -63,35 +64,45 @@ impl Default for CodeEditor {
         Self {
             language: Language::C,
             code: String::from(EXAMPLES[0].code),
+            skip_bootrom: true,
         }
     }
 }
 
 impl CodeEditor {
     pub fn ui(&mut self, ui: &mut egui::Ui, tx: &mut Sender<TaskCommand>) {
-        let Self { language, code } = self;
+        let Self {
+            language,
+            code,
+            skip_bootrom,
+        } = self;
 
-        ComboBox::from_label("Language")
-            .selected_text(format!("{:?}", language))
-            .show_ui(ui, |ui| {
-                ui.selectable_value(language, Language::C, "C");
-                // Add more languages here if needed
-            });
+        ui.horizontal(|ui| {
+            ui.label("Language");
+            ComboBox::from_label("")
+                .selected_text(format!("{:?}", language))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(language, Language::C, "C");
+                    // Add more languages here if needed
+                });
 
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 0.0;
-            ui.label("Syntax highlighting powered by ");
-            ui.hyperlink_to("syntect", "https://github.com/trishume/syntect");
-            ui.label(".");
+            ui.add_space(30.0);
+
+            if ui
+                .button("Flash")
+                .on_hover_text("Flash the code to the Pico2")
+                .clicked()
+            {
+                let _ = tx.try_send(TaskCommand::FlashCode(
+                    language.clone(),
+                    code.clone(),
+                    *skip_bootrom,
+                ));
+            }
+
+            ui.checkbox(skip_bootrom, "Skip Bootrom")
+                .on_hover_text("Skip the bootrom code");
         });
-
-        if ui
-            .button("Flash")
-            .on_hover_text("Flash the code to the Pico2")
-            .clicked()
-        {
-            let _ = tx.try_send(TaskCommand::FlashCode(language.clone(), code.clone()));
-        }
 
         let theme = egui_extras::syntax_highlighting::CodeTheme::from_memory(ui.ctx(), ui.style());
 

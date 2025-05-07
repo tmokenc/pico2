@@ -14,12 +14,14 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use web_time as time;
 
+type ShoulSkipBootrom = bool;
+
 pub enum TaskCommand {
     Run,
     Pause,
     Step,
     Stop,
-    FlashCode(Language, String),
+    FlashCode(Language, String, ShoulSkipBootrom),
 }
 
 pub fn pick_file_into_pico2(ctx: Context, pico2: Rc<RefCell<Pico2>>) {
@@ -86,7 +88,7 @@ async fn compile_source_code(lang: Language, code: &str) -> Result<Vec<u8>, Stri
     }
 }
 
-async fn flash_code(ctx: &Context, pico2: &mut Pico2, lang: Language, code: &str) {
+async fn flash_code(pico2: &mut Pico2, lang: Language, code: &str) {
     // TODO add a loading spinner
     let uf2 = match compile_source_code(lang, code).await {
         Ok(uf2) => uf2,
@@ -113,8 +115,7 @@ pub fn run_pico2_sim(
     let (tx, mut rx): (Sender<TaskCommand>, Receiver<TaskCommand>) = channel(4);
 
     wasm_bindgen_futures::spawn_local(async move {
-        let mut now = time::Instant::now();
-        let mut future = rx.next();
+        let mut now;
         let mut request_repaint = 5;
 
         loop {
@@ -150,12 +151,15 @@ pub fn run_pico2_sim(
                         match cmd {
                             Some(TaskCommand::Stop) => {
                                 *is_running.borrow_mut() = false;
-                                pico2.borrow_mut().reset();
                             }
                             Some(TaskCommand::Pause) => *is_running.borrow_mut() = false,
-                            Some(TaskCommand::FlashCode(language, code)) => {
+                            Some(TaskCommand::FlashCode(language, code, skip_bootrom)) => {
                                 *is_running.borrow_mut() = false;
-                                flash_code(&ctx, &mut pico2.borrow_mut(), language, &code).await;
+                                let mut mcu = pico2.borrow_mut();
+                                flash_code(&mut *mcu, language, &code).await;
+                                if skip_bootrom {
+                                    mcu.skip_bootrom();
+                                }
                             }
                             _ => {}
                         }
@@ -167,8 +171,12 @@ pub fn run_pico2_sim(
                     Some(TaskCommand::Step) => pico2.borrow_mut().step(),
                     Some(TaskCommand::Stop) => pico2.borrow_mut().reset(),
                     Some(TaskCommand::Pause) => *is_running.borrow_mut() = false,
-                    Some(TaskCommand::FlashCode(language, code)) => {
-                        flash_code(&ctx, &mut pico2.borrow_mut(), language, &code).await;
+                    Some(TaskCommand::FlashCode(language, code, skip_bootrom)) => {
+                        let mut mcu = pico2.borrow_mut();
+                        flash_code(&mut *mcu, language, &code).await;
+                        if skip_bootrom {
+                            mcu.skip_bootrom();
+                        }
                     }
                     None => {}
                 }
