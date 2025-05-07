@@ -1,3 +1,10 @@
+/**
+ * @file processor/cortex_m33.rs
+ * @author Nguyen Le Duy
+ * @date 02/01/2025
+ * @brief Cortex-M33 processor architecture implementation
+ * @todo just a placeholder for now, need to implement the Cortex-M33 architecture
+ */
 use super::CpuArchitecture;
 use super::ProcessorContext;
 

@@ -1,3 +1,9 @@
+/**
+ * @file clock/event.rs
+ * @author Nguyen Le Duy
+ * @date 02/01/2025
+ * @brief Definition of the event type that used in the calendar
+ */
 use core::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

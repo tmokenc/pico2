@@ -1,13 +1,13 @@
-//! UF2 parser
-//! Author: Nguyen Le Duy
-//! Date: 08/04/2025
-//!
-
+/**
+ * @file: uf2.rs
+ * @author: Nguyen Le Duy
+ * @date: 08/04/2025
+ * @brief: Library for UF2 parser
+ */
 use thiserror::Error;
 
 #[derive(Debug, Clone)]
 pub struct Uf2Block {
-    // 32 byte header
     pub flags: u32,
     pub target_addr: u32,
     pub block_no: u32,

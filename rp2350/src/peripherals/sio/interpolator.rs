@@ -1,6 +1,11 @@
-//! Interpolator
-//! Ported from the TypeScript implementation from Wokwi
-//! https://github.com/wokwi/rp2040js/blob/main/src/interpolator.ts
+/**
+ * @file peripherals/sio/interpolator.rs
+ * @author Nguyen Le Duy
+ * @date 04/04/2025
+ * @brief Boot RAM peripheral implementation
+ * Ported from the TypeScript implementation from Wokwi
+ * https://github.com/wokwi/rp2040js/blob/main/src/interpolator.ts
+ */
 
 #[derive(Default)]
 pub struct InterpolatorConfig {

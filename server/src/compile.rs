@@ -1,3 +1,9 @@
+/**
+ * @file compile.rs
+ * @author Nguyen Le Duy
+ * @date 09/04/2025
+ * @brief Handling compilation requests and responses.
+ */
 use api_types::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

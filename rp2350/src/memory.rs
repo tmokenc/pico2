@@ -1,3 +1,9 @@
+/**
+ * @file memory.rs
+ * @author Nguyen Le Duy
+ * @date 02/01/2025
+ * @brief Generic memory implementation
+ */
 use std::ops::Deref;
 use thiserror::Error;
 

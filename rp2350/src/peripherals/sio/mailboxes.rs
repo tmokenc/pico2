@@ -1,3 +1,9 @@
+/**
+ * @file peripherals/sio/mailboxes.rs
+ * @author Nguyen Le Duy
+ * @date 04/01/2025
+ * @brief Boot RAM peripheral implementation
+ */
 use crate::common::Requestor;
 use crate::utils::Fifo;
 

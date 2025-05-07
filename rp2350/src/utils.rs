@@ -1,5 +1,9 @@
-//! Utility functions and data structures for the emulator.
-
+/**
+ * @file utils.rs
+ * @author Nguyen Le Duy
+ * @date 02/01/2025
+ * @brief Define utility functions
+ */
 pub mod fifo;
 
 pub use fifo::{Fifo, FifoError};

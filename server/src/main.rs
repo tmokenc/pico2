@@ -1,3 +1,9 @@
+/**
+ * @file main.rs
+ * @author Nguyen Le Duy
+ * @date 09/04/2025
+ * @brief Main entry point for the server.
+ */
 use api_types::{CompilationRequest, CompilationStatusRequest};
 use std::net;
 use std::sync::Arc;

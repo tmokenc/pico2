@@ -1,3 +1,13 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use crate::interrupts::Interrupts;
+/**
+ * @file /processor/hazard/csrs.rs
+ * @author Nguyen Le Duy
+ * @date 02/01/2025
+ * @brief Control and Status Registers (CSRs) for the RP2350
+ */
 use crate::utils::extract_bits;
 
 /// All CSRs are 32-bit, and MXLEN is fixed at 32 bits. CSR addresses not listed in this section are unimplemented.
@@ -90,11 +100,12 @@ impl Default for Csrs {
             medeleg: 0,
             mideleg: 0,
             minstret: 0,
-            mstatus: 0,
+            mstatus: MSTATUS_MIE,
             mie: 0,
-            mtvec: 0x00001fff << 2,
+            mtvec: 0x20000324,
+            // mtvec: 0x00001fff << 2, // 0x20000324
             mcounteren: 0,
-            mcountinhibit: 0,
+            mcountinhibit: 5,
             mepc: 0,
             mscratch: 0,
             mcause: 0,
@@ -146,12 +157,12 @@ impl Csrs {
     const PMPCFG2: u16 = 0x3A2;
     const PMPCFG3: u16 = 0x3A3;
     const PMPADDR0: u16 = 0x3B0;
-    const PMPADDR1: u16 = 0x3B1;
-    const PMPADDR2: u16 = 0x3B2;
-    const PMPADDR3: u16 = 0x3B3;
-    const PMPADDR4: u16 = 0x3B4;
-    const PMPADDR5: u16 = 0x3B5;
-    const PMPADDR6: u16 = 0x3B6;
+    const _PMPADDR1: u16 = 0x3B1;
+    const _PMPADDR2: u16 = 0x3B2;
+    const _PMPADDR3: u16 = 0x3B3;
+    const _PMPADDR4: u16 = 0x3B4;
+    const _PMPADDR5: u16 = 0x3B5;
+    const _PMPADDR6: u16 = 0x3B6;
     const PMPADDR7: u16 = 0x3B7;
     const PMPADDR8: u16 = 0x3B8;
     const PMPADDR9: u16 = 0x3B9;
@@ -272,10 +283,6 @@ impl Csrs {
             self.mcycles = self.mcycles.wrapping_add(1);
         }
 
-        if self.mcountinhibit & 0b100 == 0 {
-            self.minstret = self.minstret.wrapping_add(1);
-        }
-
         if let Some((addr, data)) = self.pending_write.take() {
             self._write(addr, data);
         }
@@ -301,6 +308,9 @@ impl Csrs {
                 cause = int as u32;
             }
         }
+
+        // Set the cause in the mcause register
+        self.mcause = cause | (self.mcause & 0x8000_0000);
     }
     pub fn read(&self, offset: u16) -> Result<u32, Exception> {
         log::info!("read csr: {:#x}", offset);
@@ -620,4 +630,30 @@ impl Csrs {
             _ => unreachable!(),
         }
     }
+
+    pub(super) fn count_instret(&mut self) {
+        if self.mcountinhibit & 0b100 == 0 {
+            self.minstret = self.minstret.wrapping_add(1);
+        }
+    }
+
+    // Check for interrupt and return the handling address if needed
+    pub(super) fn interrupt_check(&mut self, pc: u32, irq: Rc<RefCell<Interrupts>>) -> Option<u32> {
+        // TODO
+        None
+        // ux_t m_targeted_irqs = get_effective_xip() & mie;
+        // bool take_m_irq = m_targeted_irqs && ((mstatus & MSTATUS_MIE) || priv < PRV_M);
+        // if (take_m_irq) {
+        // 	ux_t cause = (1u << 31) | __builtin_ctz(m_targeted_irqs);
+        // 	return trap_enter(cause, xepc);
+        // } else {
+        // 	return std::nullopt;
+        // }
+    }
+
+    // effective xip
+    // return mip |
+    // 	(irq_s ? MIP_MSIP : 0) |
+    // 	(irq_t ? MIP_MTIP : 0) |
+    // 	(irq_e ? MIP_MEIP : 0);
 }

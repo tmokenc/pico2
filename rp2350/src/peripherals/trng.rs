@@ -1,3 +1,9 @@
+/**
+ * @file peripherals/trng.rs
+ * @author Nguyen Le Duy
+ * @date 06/03/2025
+ * @brief TRNG peripheral implementation
+ */
 use crate::inspector::InspectionEvent;
 
 use super::*;

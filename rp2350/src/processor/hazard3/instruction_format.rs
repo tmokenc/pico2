@@ -1,4 +1,10 @@
-use super::{Register, Registers};
+/**
+ * @file /processor/hazard/instruction_format.rs
+ * @author Nguyen Le Duy
+ * @date 02/01/2025
+ * @brief Generic instruction format parser for RISC-V
+ */
+use super::Register;
 use crate::utils::{extract_bit, extract_bits, sign_extend};
 use core::ops::RangeInclusive;
 

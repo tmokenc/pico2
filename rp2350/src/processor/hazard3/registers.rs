@@ -1,3 +1,9 @@
+/**
+ * @file /processor/hazard/registers.rs
+ * @author Nguyen Le Duy
+ * @date 02/01/2025
+ * @brief Register file for the processor
+ */
 pub type Register = u8;
 
 pub trait RegisterValue {

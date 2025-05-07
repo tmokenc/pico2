@@ -1,6 +1,11 @@
+/**
+ * @file peripherals/busctrl.rs
+ * @author Nguyen Le Duy
+ * @date 06/02/2025
+ * @brief BusCtrl peripheral implementation
+ */
 use super::*;
 use crate::bus::*;
-use crate::common::*;
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 // default to 0x1f => SRAM6 Access
@@ -215,6 +220,10 @@ impl Peripheral for BusCtrl {
 
 #[cfg(test)]
 mod tests {
+    #![allow(unused_imports)]
+    #![allow(unused_variables)]
+    // allow unchecked result
+    #![allow(unused_must_use)]
     use super::*;
     use crate::bus::*;
     use crate::common::*;

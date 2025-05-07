@@ -1,3 +1,9 @@
+/**
+ * @file config.rs
+ * @author Nguyen Le Duy
+ * @date 09/04/2025
+ * @brief Configuration handling for the server.
+ */
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]

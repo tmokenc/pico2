@@ -1,3 +1,9 @@
+/**
+ * @file processor.rs
+ * @author Nguyen Le Duy
+ * @date 02/04/2025
+ * @brief Wrapper for the Rp2350 simulator.
+ */
 pub mod pico2;
 
 pub use crate::rp2350::Rp2350;

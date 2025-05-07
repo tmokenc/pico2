@@ -1,8 +1,9 @@
-//! pico2 - Branch Predictor
-//! Author: Nguyen Le Duy
-//! Date: 31/03/2025
-//! A simple branch predictor that uses a last branch taken strategy.
-//! This predictor keeps track of the last taken branch and predicts
+/**
+ * @file /processor/hazard/branch_predictor.rs
+ * @author Nguyen Le Duy
+ * @date 31/03/2025
+ * @brief A simple branch predictor that uses a last branch taken strategy.
+ */
 
 #[derive(Default)]
 pub struct BranchPredictor {

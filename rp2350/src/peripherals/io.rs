@@ -1,5 +1,3 @@
-use crate::utils::extract_bits;
-
 /**
  * @file peripherals/io.rs
  * @author Nguyen Le Duy
@@ -9,6 +7,7 @@ use crate::utils::extract_bits;
  *
  */
 use super::*;
+use crate::utils::extract_bits;
 
 pub const GPIO_STATUS: u16 = 0x00;
 pub const GPIO_CTRL: u16 = 0x04;

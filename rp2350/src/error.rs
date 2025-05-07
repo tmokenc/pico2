@@ -1,3 +1,9 @@
+/**
+ * @file error.rs
+ * @author Nguyen Le Duy
+ * @date 02/01/2025
+ * @brief Error handling module
+ */
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, Error)]

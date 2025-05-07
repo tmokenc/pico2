@@ -1,3 +1,11 @@
+/**
+ * @file peripherals/reset.rs
+ * @author Nguyen Le Duy
+ * @date 06/05/2025
+ * @brief Reset peripheral implementation
+ * @todo actually implement the Reset peripheral, this is just a hotfix to get the simulator
+ * running
+ */
 use super::*;
 
 pub const FRCE_ON: u16 = 0x0; // Force block out of reset (i.e. power it on)

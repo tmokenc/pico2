@@ -1,5 +1,9 @@
-//! 32-bit Spinlock implementation for SIO
-
+/**
+ * @file peripherals/sio/spinlock.rs
+ * @author Nguyen Le Duy
+ * @date 04/01/2025
+ * @brief 32-bit spinlock implementation
+ */
 use std::cell::RefCell;
 use std::rc::Rc;
 

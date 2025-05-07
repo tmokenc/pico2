@@ -31,6 +31,10 @@ pub(super) fn start_transmitting<const IDX: usize>(
         return;
     }
 
+    ctx.gpio
+        .borrow_mut()
+        .set_pin_output_enable(tx_gpio_func::<IDX>(), true);
+
     let clock = ctx.clock.clone();
     let interrupts = ctx.interrupts.clone();
     let inspector = ctx.inspector.clone();
@@ -60,6 +64,9 @@ fn transmit<const IDX: usize>(
     let bit_time = uart.get_bit_time();
 
     if !uart.is_enabled() || !uart.is_transmit_enabled() {
+        gpio_ref
+            .borrow_mut()
+            .set_pin_output_enable(tx_gpio_func::<IDX>(), false);
         return;
     }
 

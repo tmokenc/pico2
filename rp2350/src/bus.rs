@@ -1,3 +1,9 @@
+/**
+ * @file bus.rs
+ * @author Nguyen Le Duy
+ * @date 02/01/2025
+ * @brief Bus module for the Rp2350 simulator to handle memory access.
+ */
 use crate::clock::Clock;
 use crate::common::*;
 use crate::gpio::GpioController;

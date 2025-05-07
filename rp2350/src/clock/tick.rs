@@ -1,3 +1,9 @@
+/**
+ * @file clock/tick.rs
+ * @author Nguyen Le Duy
+ * @date 03/01/2025
+ * @brief Tick handling module
+ */
 use std::time::Duration;
 
 use crate::common::MHZ;

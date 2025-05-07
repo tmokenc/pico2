@@ -1,3 +1,9 @@
+/**
+ * @file lib.rs
+ * @author Nguyen Le Duy
+ * @date 02/01/2025
+ * @brief Rp2350 simulator library
+ */
 pub mod bus;
 pub mod clock;
 pub mod common;

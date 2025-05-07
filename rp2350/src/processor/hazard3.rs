@@ -1,14 +1,18 @@
-mod exec;
-// pub mod instruction;
+/**
+ * @file processor/hazard3.rs
+ * @author Nguyen Le Duy
+ * @date 02/01/2025
+ * @brief Hazard3 processor implementation.
+ */
 pub mod branch_predictor;
 pub mod csrs;
+mod exec;
 pub(crate) mod instruction_format;
 pub mod registers;
 pub mod trap;
 
 use super::{CpuArchitecture, ProcessorContext};
 use crate::bus::{BusAccessContext, LoadStatus, StoreStatus};
-use crate::interrupts::Interrupts;
 use crate::{common::*, InspectionEvent};
 use branch_predictor::BranchPredictor;
 use core::mem;
@@ -67,11 +71,11 @@ pub struct Hazard3 {
     pub registers: Registers,
     pub csrs: Csrs,
     pub xx_bypass: Option<RegisterWrite>,
+    pub branch_predictor: BranchPredictor,
+
     // for atomic instructions
     // should be clear after any atomic instruction, or SC.W or getting a trap
     pub local_monitor_bit: bool,
-
-    pub branch_predictor: BranchPredictor,
 
     // Zcmp extension
     // Some instructions may expand into a sequence of multiple instructions
@@ -112,7 +116,6 @@ impl CpuArchitecture for Hazard3 {
 
     fn tick(&mut self, ctx: &mut ProcessorContext) {
         if let State::Sleep(_) = self.state {
-            log::trace!("Processor is sleeping");
             return;
         }
 
@@ -138,8 +141,16 @@ impl CpuArchitecture for Hazard3 {
             return;
         }
 
+        // IRQ check before executing the next instruction
+        if let Some(new_pc) = self.csrs.interrupt_check(self.pc, ctx.interrupts.clone()) {
+            self.pc = new_pc;
+            self.state = State::Normal;
+            self.csrs.tick();
+            return;
+        }
+
+        // Fetch the next instruction
         let Ok(inst_code) = ctx.bus.fetch(self.pc) else {
-            log::warn!("Instruction fetch fault at 0x{:08x}", self.pc);
             self.trap_handle(Exception::InstructionFetchFault);
             return;
         };
@@ -169,6 +180,7 @@ impl CpuArchitecture for Hazard3 {
         });
 
         self.csrs.tick();
+        self.csrs.count_instret();
 
         if let Some(exception) = exception {
             ctx.inspector.emit(InspectionEvent::Exception {
@@ -205,7 +217,6 @@ impl CpuArchitecture for Hazard3 {
                 value,
                 op,
             } => {
-                log::info!("Hazard3: Atomic operation");
                 self.state = State::Atomic {
                     rd,
                     bus_state,
@@ -270,15 +281,23 @@ impl Hazard3 {
                     // Unblock the exclusive access to the address
                     self.local_monitor_bit = false;
                 }
-                StoreStatus::Error(e) => {
-                    log::warn!("Store error: {:?}", e);
+                StoreStatus::Error(_e) => {
                     self.trap_handle(Exception::StoreFault);
                     return;
                 }
             },
             State::Wfi => {
-                // TODO
-                self.state = State::Wfi;
+                match self.csrs.interrupt_check(self.pc, ctx.interrupts.clone()) {
+                    Some(new_pc) => {
+                        self.pc = new_pc;
+                        self.state = State::Normal;
+                    }
+
+                    None => {
+                        // No interrupt, just return to WFI state
+                        self.state = State::Wfi;
+                    }
+                }
             }
 
             State::Atomic {
@@ -334,15 +353,13 @@ impl Hazard3 {
                             self.registers.write(rd, read_value);
                             self.state = State::BusWaitStore(status);
                         }
-                        Err(e) => {
-                            log::warn!("Store error: {:?}", e);
+                        Err(_e) => {
                             self.trap_handle(Exception::StoreFault);
                             return;
                         }
                     }
                 }
                 LoadStatus::Error(e) => {
-                    log::warn!("Load error: {:?}", e);
                     self.trap_handle(Exception::LoadFault);
                     return;
                 }
@@ -390,7 +407,6 @@ impl Hazard3 {
                         self.state = State::BusWaitStore(status);
                     }
                     Err(e) => {
-                        log::warn!("Store error: {:?}", e);
                         self.trap_handle(Exception::StoreFault);
                         return;
                     }
@@ -422,7 +438,6 @@ impl Hazard3 {
                         self.state = State::BusWaitLoad(to_register, status);
                     }
                     Err(e) => {
-                        log::warn!("Load error: {:?}", e);
                         self.trap_handle(Exception::LoadFault);
                         return;
                     }

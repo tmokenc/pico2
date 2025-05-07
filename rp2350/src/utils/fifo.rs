@@ -1,6 +1,9 @@
-//! A generic FIFO (First In First Out) queue implementation.
-//! This is used in peripherals like UART and SIO
-
+/**
+ * @file utils/fifo.rs
+ * @author Nguyen Le Duy
+ * @date 02/01/2025
+ * @brief Generic FIFO implementation that store data in a fixed-size array on stack
+ */
 use core::mem;
 
 #[derive(Debug, Clone, Copy, PartialEq)]

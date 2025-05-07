@@ -1,10 +1,14 @@
-//! TODO
-//! DMA support
-//! Interrupt: UARTINTR and UARTRTINTR
-//! Unsure what they do when reading the datasheet
-
 #![allow(dead_code)]
-
+/**
+ * @file peripherals/uart.rs
+ * @author Nguyen Le Duy
+ * @date 01/05/2025
+ * @brief UART peripheral implementation
+ * @todo DMA support
+ * DMA support
+ * Interrupt: UARTINTR and UARTRTINTR
+ * Unsure what they do when reading the datasheet
+ */
 use super::*;
 use crate::utils::{extract_bit, extract_bits, w1c, Fifo};
 use std::cell::RefCell;
@@ -178,7 +182,7 @@ impl<const IDX: usize> Uart<IDX> {
             baud_fbrd = 0;
         }
 
-        let clock = 150 * MHZ;
+        let clock = 48 * MHZ;
         let baudrate = (4 * clock) / (64 * baud_ibrd + baud_fbrd);
         baudrate as u32
     }

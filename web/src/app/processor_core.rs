@@ -1,7 +1,7 @@
 /**
  * @file app/processor_core.rs
  * @author Nguyen Le Duy
- * @date 14/05/2025
+ * @date 04/05/2025
  * @brief View window for the processor core
  */
 use super::Rp2350Component;

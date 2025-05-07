@@ -1,3 +1,9 @@
+/**
+ * @file /processor/hazard/trap.rs
+ * @author Nguyen Le Duy
+ * @date 02/01/2025
+ * @brief Definition of Trap types on RISC-V
+ */
 use crate::interrupts::*;
 
 #[derive(Debug, PartialEq, Clone, Copy)]

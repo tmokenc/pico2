@@ -1,3 +1,9 @@
+/**
+ * @file processor.rs
+ * @author Nguyen Le Duy
+ * @date 02/01/2025
+ * @brief Definition of the processor module for the Rp2350 architecture.
+ */
 pub mod cortex_m33;
 pub mod hazard3;
 

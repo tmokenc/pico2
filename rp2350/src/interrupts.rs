@@ -1,6 +1,9 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
+/**
+ * @file interrupts.rs
+ * @author Nguyen Le Duy
+ * @date 02/01/2025
+ * @brief Interrupts implementation
+ */
 pub type Interrupt = u8;
 
 pub struct InterruptIter(u64);

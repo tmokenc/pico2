@@ -1,3 +1,9 @@
+/**
+ * @file inspector.rs
+ * @author Nguyen Le Duy
+ * @date 05/05/2025
+ * @brief Inspector module for the Rp2350 simulator to track events.
+ */
 use std::rc::Rc;
 
 use crate::bus::BusError;
@@ -94,13 +100,13 @@ impl Inspector for LoggerInspector {
     fn handle_event(&self, event: InspectionEvent) {
         match event {
             InspectionEvent::ClockEventActivated(typ) => {
-                log::info!("Clock event activated: {typ:?}");
+                log::trace!("Clock event activated: {typ:?}");
             }
             InspectionEvent::ClockEventScheduled(typ) => {
-                log::info!("Clock event scheduled: {typ:?}");
+                log::trace!("Clock event scheduled: {typ:?}");
             }
             InspectionEvent::ClockEventCanceled(typ) => {
-                log::info!("Clock event canceled: {typ:?}");
+                log::trace!("Clock event canceled: {typ:?}");
             }
             InspectionEvent::TrngGenerated(value) => {
                 log::info!("RNG: generated value: {value}");
@@ -124,7 +130,7 @@ impl Inspector for LoggerInspector {
             }
 
             InspectionEvent::TickCore(core) => {
-                log::info!("Core {core}: Tick event");
+                log::trace!("Core {core}: Tick event");
             }
             InspectionEvent::WakeCore(core) => {
                 log::info!("Core {core}: Wake event");
@@ -144,7 +150,7 @@ impl Inspector for LoggerInspector {
                 address,
                 value,
             } => {
-                log::info!("Bus Store: {requestor:?} {size:?} {address:#010x} {value:#010x}");
+                log::info!("Bus Store: {requestor:?} {size:?} address: {address:#010x} | value: {value:#010x}");
             }
 
             InspectionEvent::BusLoad {
@@ -152,7 +158,7 @@ impl Inspector for LoggerInspector {
                 size,
                 address,
             } => {
-                log::info!("Bus Load: {requestor:?} {size:?} {address:#010x}");
+                log::info!("Bus Load: {requestor:?} {size:?} address: {address:#010x}");
             }
 
             InspectionEvent::BusError {
@@ -161,7 +167,8 @@ impl Inspector for LoggerInspector {
                 size,
                 address,
             } => {
-                log::info!("Bus Error: {error:?} {requestor:?} {size:?} {address:#010x}");
+                // Detailing about error message
+                log::error!("Bus Error: {error:?} {requestor:?} {size:?} address: {address:#010x}");
             }
         }
     }

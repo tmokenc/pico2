@@ -7,14 +7,12 @@
  */
 use super::*;
 
-pub mod doorbell;
 pub mod interpolator;
 pub mod mailboxes;
 pub mod spinlock;
 pub mod timer;
 pub mod tmds;
 
-use doorbell::DoorBell;
 use interpolator::Interpolator;
 use mailboxes::Mailboxes;
 use spinlock::SpinLock;
@@ -28,7 +26,6 @@ use tmds::TmdsEncoder;
 pub struct Sio {
     mailboxes: RefCell<Mailboxes>,
     spinlock: SpinLock,
-    doorbell: DoorBell,
     timer: [RiscVPlatformTimer; 2],
     interpolator0: [RefCell<Interpolator<0>>; 2],
     interpolator1: [RefCell<Interpolator<1>>; 2],
@@ -43,7 +40,6 @@ impl Sio {
         Self {
             mailboxes: RefCell::new(Mailboxes::default()),
             spinlock: SpinLock::default(),
-            doorbell: DoorBell::default(),
             timer: [RiscVPlatformTimer::default(), RiscVPlatformTimer::default()],
             interpolator0: [Default::default(), Default::default()],
             interpolator1: [Default::default(), Default::default()],

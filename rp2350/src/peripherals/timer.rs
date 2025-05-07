@@ -1,3 +1,9 @@
+/**
+ * @file peripherals/timer.rs
+ * @author Nguyen Le Duy
+ * @date 02/05/2025
+ * @brief Timer peripheral implementation
+ */
 use crate::clock::{EventType, Ticks};
 use crate::interrupts::Interrupt;
 use crate::utils::extract_bit;
@@ -225,11 +231,6 @@ impl<const IDX: usize> Peripheral for Rc<RefCell<Timer<IDX>>> {
             INTS | TIMERAWH | TIMERAWL | TIMEHR | TIMELR => { /* read only */ }
             _ => return Err(PeripheralError::OutOfBounds),
         };
-        log::warn!(
-            "Unimplemented peripheral write at address {:#X} with value {:#X}",
-            ctx.address,
-            value
-        );
         Ok(())
     }
 }

@@ -1,3 +1,9 @@
+/**
+ * @file peripherals/bootram.rs
+ * @author Nguyen Le Duy
+ * @date 04/01/2025
+ * @brief Boot RAM peripheral implementation
+ */
 use super::*;
 use crate::memory::GenericMemory;
 use std::cell::RefCell;

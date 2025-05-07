@@ -30,7 +30,7 @@ pub enum CompilationResponse {
 
 /// Supported programming languages for compilation.
 /// Currently, only C is supported.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Language {
     #[serde(rename = "c")]
     C,
@@ -38,7 +38,7 @@ pub enum Language {
 
 /// Supported compilation target architectures.
 /// Currently, only RISC-V is supported.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Target {
     #[serde(rename = "riscv")]
     RiscV,

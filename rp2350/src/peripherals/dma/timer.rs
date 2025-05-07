@@ -1,3 +1,9 @@
+/**
+ * @file peripherals/dma/timer.rs
+ * @author Nguyen Le Duy
+ * @date 29/04/2025
+ * @brief DMA timer implementation
+ */
 #[derive(Clone, Copy, Debug)]
 pub struct Timer {
     pub x: u16,

@@ -1,3 +1,10 @@
+/**
+ * @file peripherals/pwm.rs
+ * @author Nguyen Le Duy
+ * @date 22/04/2025
+ * @brief PWM peripheral implementation
+ * @todo correction
+ */
 use crate::clock::EventType;
 use crate::utils::extract_bit;
 

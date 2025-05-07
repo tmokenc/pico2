@@ -1,3 +1,10 @@
+/**
+ * @file peripherals/i2c.rs
+ * @author Nguyen Le Duy
+ * @date 04/05/2025
+ * @brief I2C peripheral implementation
+ * @todo actually implement the I2C peripheral
+ */
 use crate::interrupts::{Interrupt, Interrupts};
 use crate::utils::{extract_bit, set_bit, set_bit_state, Fifo};
 

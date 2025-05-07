@@ -1,3 +1,9 @@
+/**
+ * @file processor.rs
+ * @author Nguyen Le Duy
+ * @date 02/01/2025
+ * @brief Entry point for the Rp2350 simulator.
+ */
 use crate::bus::{self, Bus};
 use crate::clock::Clock;
 use crate::common::MB;
@@ -161,10 +167,14 @@ impl Rp2350 {
     }
 
     pub fn skip_bootrom(&mut self) {
-        self.processor[0].set_pc(0x1000_0086);
-        self.processor[1].set_pc(0x1000_0086);
-        // self.processor[0].set_pc(0x1000_008a);
-        // self.processor[1].set_pc(0x1000_008a);
+        // self.processor[0].set_pc(0x1000_0086);
+        // self.processor[1].set_pc(0x1000_0086);
+        self.processor[0].set_pc(0x1000_008a);
+        self.processor[1].set_pc(0x1000_008a);
+        // 0x20002c44 add something to this in SRAM for AMOOR.W
+        // 0x20000134
+        self.bus.sram.write_u32(0x0002c44, 0x20002c54).ok();
+        self.bus.sram.write_u32(0x0000134, 0x20002c54).ok();
 
         // dumped registers
         let regs = [

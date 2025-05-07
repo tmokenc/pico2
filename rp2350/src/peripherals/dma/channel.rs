@@ -1,3 +1,9 @@
+/**
+ * @file peripherals/dma/channel.rs
+ * @author Nguyen Le Duy
+ * @date 29/04/2025
+ * @brief DMA channel implementation
+ */
 use std::cell::RefCell;
 use std::rc::Rc;
 

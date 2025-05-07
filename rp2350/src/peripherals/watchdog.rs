@@ -1,8 +1,12 @@
+/**
+ * @file peripherals/xosc.rs
+ * @author Nguyen Le Duy
+ * @date 06/05/2025
+ * @brief XOSC peripheral implementation
+ * @todo actually implement the XOSC peripheral, this is just a hotfix to get the simulator running
+ */
 use super::*;
-use crate::clock::Clock;
 use crate::utils::extract_bit;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 pub const CTRL: u16 = 0x0000; // Watchdog control
 pub const LOAD: u16 = 0x0004; // Load the watchdog timer

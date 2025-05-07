@@ -1,3 +1,10 @@
+/**
+ * @file peripherals/otp.rs
+ * @author Nguyen Le Duy
+ * @date 22/01/2025
+ * @brief One Time Programmable (OTP) peripheral implementation
+ * @todo need real hardware to implement this
+ */
 use super::*;
 
 pub const CRIT0: u16 = 0x038; // Page 0 critical boot flags (RBIT-8)

@@ -18,7 +18,17 @@ add_executable(main
 )
 
 # Add pico_stdlib library which aggregates commonly used features
-target_link_libraries(main pico_stdlib)
+target_link_libraries(
+    main 
+    pico_stdlib
+    hardware_pwm
+    hardware_sha256
+    hardware_dma
+    hardware_spi
+    hardware_i2c
+    pico_multicore
+    pico_sha256
+)
 
 # create map/bin/hex/uf2 file in addition to ELF.
 pico_add_extra_outputs(main)

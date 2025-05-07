@@ -1,4 +1,9 @@
-//! Common types and constants used in the library.
+/**
+ * @file common.rs
+ * @author Nguyen Le Duy
+ * @date 02/01/2025
+ * @brief Common constants and types for the Rp2350 simulator
+ */
 
 pub const KB: usize = 1 << 10;
 pub const MB: usize = KB << 10;

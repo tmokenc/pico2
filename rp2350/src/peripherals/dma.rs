@@ -1,3 +1,10 @@
+/**
+ * @file peripherals/dma.rs
+ * @author Nguyen Le Duy
+ * @date 22/04/2025
+ * @brief DMA peripheral implementation
+ * @todo test against the real hardware
+ */
 use self::channel::TransferMode;
 
 use super::*;

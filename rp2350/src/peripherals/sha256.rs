@@ -1,3 +1,9 @@
+/**
+ * @file peripherals/sha256.rs
+ * @author Nguyen Le Duy
+ * @date 22/01/2025
+ * @brief SHA256 peripheral implementation
+ */
 use super::*;
 use crate::clock::EventType;
 use sha2::Digest;

@@ -1,3 +1,9 @@
+/**
+ * @file simulator/pico2.rs
+ * @author Nguyen Le Duy
+ * @date 02/05/2025
+ * @brief Wrapper for the RP2350 MCU that represents the Raspberry Pi Pico 2 board.
+ */
 use super::Rp2350;
 use crate::common::*;
 use core::ops::{Deref, DerefMut};

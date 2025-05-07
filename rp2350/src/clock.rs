@@ -1,3 +1,9 @@
+/**
+ * @file clock.rs
+ * @author Nguyen Le Duy
+ * @date 02/01/2025
+ * @brief Clock module for the Rp2350 simulator to handle the clock and events.
+ */
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 
