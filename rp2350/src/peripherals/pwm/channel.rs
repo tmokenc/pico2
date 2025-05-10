@@ -1,3 +1,14 @@
+/**
+ * @file peripherals/pwm/channel.rs
+ * @author Nguyen Le Duy
+ * @date 07/05/2025
+ * @brief Channel definition for the PWM peripheral
+ */
+use std::time::Duration;
+
+use crate::clock::Ticks;
+use crate::common::MHZ;
+use crate::gpio::FunctionSelect;
 use crate::utils::{extract_bit, extract_bits};
 
 #[derive(Clone, Copy)]
@@ -8,6 +19,12 @@ pub enum DivMode {
     Fall,  // falling edge on b pin
 }
 
+impl DivMode {
+    pub fn is_channel_b_input(&self) -> bool {
+        matches!(self, DivMode::Level | DivMode::Rise | DivMode::Fall)
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct PwmChannel {
     pub csr: u8,
@@ -15,8 +32,8 @@ pub struct PwmChannel {
     pub ctr: u16,
     pub cc: u32,
     pub top: u16,
-    pub irq_wrap_0: bool,
-    pub irq_wrap_1: bool,
+    pub wrapped: bool,
+    counting_up: bool,
 }
 
 impl Default for PwmChannel {
@@ -27,63 +44,61 @@ impl Default for PwmChannel {
             ctr: 0,
             cc: 0,
             top: 0xffff,
-            irq_wrap_0: false,
-            irq_wrap_1: false,
+            wrapped: false,
+            counting_up: true,
         }
     }
 }
 
 impl PwmChannel {
     pub fn advance(&mut self) {
-        if self.ph_correct() {
-            // TODO
+        if self.top == 0 {
+            return;
         }
 
-        if self.invert_b() {
-            // TODO
+        if self.ph_correct() && self.ctr == self.top {
+            self.counting_up = false;
         }
 
-        if self.invert_a() {
-            // TODO
+        if (self.ph_correct() && !self.counting_up && self.ctr == 0) || !self.ph_correct() {
+            self.counting_up = true;
         }
 
-        match self.divmode() {
-            DivMode::Div => {
-                self.ctr = (self.ctr + 1) % self.div;
-            }
-            DivMode::Level => {
-                if self.ctr == self.div {
-                    self.ctr = 0;
-                }
-            }
-            DivMode::Rise => {
-                if self.ctr == self.div {
-                    self.irq_wrap_0 = true;
-                }
-            }
-            DivMode::Fall => {
-                if self.ctr == self.div {
-                    self.irq_wrap_1 = true;
-                }
-            }
+        if self.counting_up {
+            self.ctr += 1;
+        } else {
+            self.ctr -= 1;
+        }
+
+        if self.ctr > self.top {
+            self.ctr = 0;
+        }
+
+        if self.ctr == 0 {
+            self.wrapped = true;
         }
     }
 
-    pub fn next_update(&mut self) -> u64 {
-        let mut next = 0;
+    /// calculate the next update time
+    pub fn next_update(&self) -> Ticks {
+        let div = (self.div >> 4) as f64;
+        let frac = (self.div & 0x0f) as f64;
 
-        // calculate the next update time
-        let div = self.div >> 4;
-        let frac = self.div & 0x0f;
+        if div == 0.0 {
+            return Ticks::from(256);
+        }
 
-        // TODO
+        let divisor = div + (frac / 16.0);
 
-        next
+        let duration = Duration::from_secs(1)
+            .div_f64(150.0 * MHZ as f64)
+            .div_f64(divisor);
+
+        Ticks::from(duration)
     }
 
-    pub fn is_interrupting(&self, index: u32) -> bool {
-        let cmp = (self.cc >> (16 * index)) as u16;
-        self.ctr >= cmp
+    pub fn is_interrupting(&self) -> bool {
+        self.wrapped
     }
 
     pub fn update_csr(&mut self, value: u8) {
@@ -92,17 +107,36 @@ impl PwmChannel {
         self.csr = value & 0b11_1111;
 
         if ph_advance == 1 {
-            self.ctr += 1;
+            if self.ctr == self.top {
+                self.ctr = 0;
+            } else {
+                self.ctr += 1;
+            }
+
+            if self.ctr == 0 {
+                self.wrapped = true;
+            }
         }
 
         if ph_ret == 1 {
-            self.ctr -= 1;
+            if self.ctr == 0 {
+                self.ctr = self.top;
+            } else {
+                self.ctr -= 1;
+            }
+
+            if self.ctr == 0 {
+                self.wrapped = true;
+            }
         }
     }
 
     pub fn clear_interrupt(&mut self) {
-        self.irq_wrap_0 = false;
-        self.irq_wrap_1 = false;
+        self.wrapped = false;
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        extract_bit(self.csr, 0) == 1
     }
 
     pub fn enable(&mut self) {
@@ -111,10 +145,6 @@ impl PwmChannel {
 
     pub fn disable(&mut self) {
         self.csr &= !1;
-    }
-
-    pub fn is_enabled(&self) -> bool {
-        extract_bit(self.csr, 0) == 1
     }
 
     pub fn ph_correct(&self) -> bool {
@@ -129,6 +159,24 @@ impl PwmChannel {
         extract_bit(self.csr, 3) == 1
     }
 
+    pub(super) fn output_a(&self) -> bool {
+        let output = self.ctr >= self.cc as u16;
+        if self.invert_a() {
+            !output
+        } else {
+            output
+        }
+    }
+
+    pub(super) fn output_b(&self) -> bool {
+        let output = self.ctr >= (self.cc >> 16) as u16;
+        if self.invert_b() {
+            !output
+        } else {
+            output
+        }
+    }
+
     pub fn divmode(&self) -> DivMode {
         match extract_bits(self.csr, 4..=5) {
             0 => DivMode::Div,
@@ -137,5 +185,19 @@ impl PwmChannel {
             3 => DivMode::Fall,
             _ => unreachable!(),
         }
+    }
+}
+// 2 function select, a and b
+pub(super) fn channel_as_function_select(index: u8) -> (FunctionSelect, FunctionSelect) {
+    match index {
+        0 => (FunctionSelect::PWM0_A, FunctionSelect::PWM0_B),
+        1 => (FunctionSelect::PWM1_A, FunctionSelect::PWM1_B),
+        2 => (FunctionSelect::PWM2_A, FunctionSelect::PWM2_B),
+        3 => (FunctionSelect::PWM3_A, FunctionSelect::PWM3_B),
+        4 => (FunctionSelect::PWM4_A, FunctionSelect::PWM4_B),
+        5 => (FunctionSelect::PWM5_A, FunctionSelect::PWM5_B),
+        6 => (FunctionSelect::PWM6_A, FunctionSelect::PWM6_B),
+        7 => (FunctionSelect::PWM7_A, FunctionSelect::PWM7_B),
+        _ => unreachable!(),
     }
 }

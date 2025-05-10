@@ -3,18 +3,21 @@
  * @author Nguyen Le Duy
  * @date 22/04/2025
  * @brief PWM peripheral implementation
- * @todo correction
  */
-use crate::clock::EventType;
 use crate::utils::extract_bit;
+
+use self::channel::{channel_as_function_select, DivMode};
 
 use super::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 pub mod channel;
+mod schedule;
 
 pub use channel::PwmChannel;
+pub use schedule::channel_b_update;
+use schedule::{start_channel, stop_channel};
 
 pub const CHN_CSR: u16 = 0x000; // Control and status register
 pub const CHN_DIV: u16 = 0x004; // INT and FRAC form a fixed-point fractional number
@@ -42,17 +45,11 @@ pub struct Pwm {
 }
 
 impl Pwm {
-    fn interrupt_raw(&self, is_wrap0: bool) -> u16 {
+    fn interrupt_raw(&self) -> u16 {
         let mut result = 0;
         for (i, channel) in self.channels.iter().enumerate() {
-            if is_wrap0 {
-                if channel.irq_wrap_0 {
-                    result |= 1 << i;
-                }
-            } else {
-                if channel.irq_wrap_1 {
-                    result |= 1 << i;
-                }
+            if channel.is_interrupting() {
+                result |= 1 << i;
             }
         }
         result
@@ -68,62 +65,39 @@ impl Pwm {
         result
     }
 
-    fn update_interrupt(&mut self, interrupts: Rc<RefCell<Interrupts>>) {
-        let irq0 =
-            (self.interrupt_raw(false) & self.interrupts_mask[0]) & !self.interrupts_forced[0];
-        let irq1 =
-            (self.interrupt_raw(true) & self.interrupts_mask[1]) & !self.interrupts_forced[1];
+    pub(self) fn update_gpio(&mut self, gpio: Rc<RefCell<GpioController>>, channel_idx: usize) {
+        let channel = &self.channels[channel_idx];
+        let mut gpio = gpio.borrow_mut();
+
+        for i in 0..8 {
+            // only 8 has gpio out
+            let mut a_output_enable = false;
+            let mut b_output_enable = false;
+
+            if channel.is_enabled() {
+                a_output_enable = true;
+                if !channel.divmode().is_channel_b_input() {
+                    b_output_enable = true;
+                }
+            }
+
+            let (func_a, func_b) = channel_as_function_select(i);
+
+            gpio.set_pin_output_enable(func_a, a_output_enable);
+            gpio.set_pin_output_enable(func_b, b_output_enable);
+            gpio.set_pin_output(func_a, channel.output_a());
+            gpio.set_pin_output(func_b, channel.output_b());
+        }
+    }
+
+    pub(self) fn update_interrupt(&mut self, interrupts: Rc<RefCell<Interrupts>>) {
+        let irq0 = (self.interrupt_raw() & self.interrupts_mask[0]) & !self.interrupts_forced[0];
+        let irq1 = (self.interrupt_raw() & self.interrupts_mask[1]) & !self.interrupts_forced[1];
 
         let mut global = interrupts.borrow_mut();
         global.set_irq(Interrupts::PWM_IRQ_WRAP_0, irq0 != 0);
         global.set_irq(Interrupts::PWM_IRQ_WRAP_1, irq1 != 0);
     }
-}
-
-fn start_channel(pwm_ref: Rc<RefCell<Pwm>>, channel: usize, ctx: &PeripheralAccessContext) {
-    let pwm = pwm_ref.borrow();
-    let is_channel_enabled = pwm.channels[channel].is_enabled();
-    drop(pwm);
-
-    let pwm = pwm_ref.clone();
-    let clock = ctx.clock.clone();
-    let dma = ctx.dma.clone();
-    let interrupts = ctx.interrupts.clone();
-    let inspector = ctx.inspector.clone();
-
-    if is_channel_enabled {
-        ctx.clock.schedule(0, EventType::Pwm(channel), move || {
-            channel_update(pwm, channel, clock, dma, interrupts, inspector)
-        });
-    }
-}
-
-fn channel_update(
-    pwm_ref: Rc<RefCell<Pwm>>,
-    channel: usize,
-    clock_ref: Rc<Clock>,
-    dma_ref: Rc<RefCell<Dma>>,
-    interrupts_ref: Rc<RefCell<Interrupts>>,
-    inspector: InspectorRef,
-) {
-    // TODO interrupt
-
-    let ticks = {
-        let mut pwm = pwm_ref.borrow_mut();
-        let ref mut channel = pwm.channels[channel];
-        channel.advance();
-        channel.next_update()
-    };
-
-    let pwm = pwm_ref.clone();
-    let clock = clock_ref.clone();
-    let dma = dma_ref.clone();
-    let interrupts = interrupts_ref.clone();
-    let inspector = inspector.clone();
-
-    clock_ref.schedule(ticks, EventType::Pwm(channel), move || {
-        channel_update(pwm, channel, clock, dma, interrupts, inspector)
-    });
 }
 
 impl Peripheral for Rc<RefCell<Pwm>> {
@@ -146,18 +120,16 @@ impl Peripheral for Rc<RefCell<Pwm>> {
                 }
             }
             EN => pwm.enable_status(),
-            INTR => (pwm.interrupt_raw(false) | pwm.interrupt_raw(true)) as u32,
+            INTR => pwm.interrupt_raw() as u32,
             IRQ0_INTE => pwm.interrupts_mask[0] as u32,
             IRQ0_INTF => pwm.interrupts_forced[0] as u32,
             IRQ0_INTS => {
-                ((pwm.interrupt_raw(false) & pwm.interrupts_mask[0]) | pwm.interrupts_forced[0])
-                    as u32
+                ((pwm.interrupt_raw() & pwm.interrupts_mask[0]) | pwm.interrupts_forced[0]) as u32
             }
             IRQ1_INTE => pwm.interrupts_mask[1] as u32,
             IRQ1_INTF => pwm.interrupts_forced[1] as u32,
             IRQ1_INTS => {
-                ((pwm.interrupt_raw(true) & pwm.interrupts_mask[1]) | pwm.interrupts_forced[1])
-                    as u32
+                ((pwm.interrupt_raw() & pwm.interrupts_mask[1]) | pwm.interrupts_forced[1]) as u32
             }
             _ => return Err(PeripheralError::OutOfBounds),
         };
@@ -180,7 +152,22 @@ impl Peripheral for Rc<RefCell<Pwm>> {
                 let mut channel = pwm.channels[index as usize];
 
                 match relative_offset {
-                    CHN_CSR => channel.update_csr(value as u8),
+                    CHN_CSR => {
+                        channel.update_csr(value as u8);
+                        if channel.is_enabled() {
+                            drop(pwm);
+                            start_channel(
+                                self.clone(),
+                                index as usize,
+                                ctx.clock.clone(),
+                                ctx.gpio.clone(),
+                                ctx.interrupts.clone(),
+                                ctx.inspector.clone(),
+                            );
+                        } else {
+                            stop_channel(index as usize, ctx.clock.clone());
+                        }
+                    }
                     CHN_DIV => channel.div = value as u16,
                     CHN_CTR => channel.ctr = value as u16,
                     CHN_CC => channel.cc = value as u32,
@@ -192,10 +179,17 @@ impl Peripheral for Rc<RefCell<Pwm>> {
                 for i in 0..NOF_CHANNEL {
                     if extract_bit(value, i as u32) == 1 {
                         pwm.channels[i].enable();
-                        start_channel(self.clone(), i, ctx);
+                        start_channel(
+                            self.clone(),
+                            i,
+                            ctx.clock.clone(),
+                            ctx.gpio.clone(),
+                            ctx.interrupts.clone(),
+                            ctx.inspector.clone(),
+                        );
                     } else {
                         pwm.channels[i].disable();
-                        ctx.clock.cancel(EventType::Pwm(i));
+                        stop_channel(i, ctx.clock.clone());
                     }
                 }
             }
@@ -226,8 +220,6 @@ impl Peripheral for Rc<RefCell<Pwm>> {
             IRQ0_INTS | IRQ1_INTS => { /* Read only */ }
             _ => return Err(PeripheralError::OutOfBounds),
         }
-
-        pwm.update_interrupt(ctx.interrupts.clone());
 
         Ok(())
     }
