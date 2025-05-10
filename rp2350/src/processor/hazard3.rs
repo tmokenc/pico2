@@ -268,8 +268,7 @@ impl Hazard3 {
                     self.local_monitor_bit = true;
                 }
 
-                LoadStatus::Error(e) => {
-                    log::warn!("Load error: {:?}", e);
+                LoadStatus::Error(_e) => {
                     self.trap_handle(Exception::LoadFault);
                     return;
                 }
@@ -359,7 +358,7 @@ impl Hazard3 {
                         }
                     }
                 }
-                LoadStatus::Error(e) => {
+                LoadStatus::Error(_e) => {
                     self.trap_handle(Exception::LoadFault);
                     return;
                 }
@@ -406,7 +405,7 @@ impl Hazard3 {
                     Ok(status) => {
                         self.state = State::BusWaitStore(status);
                     }
-                    Err(e) => {
+                    Err(_e) => {
                         self.trap_handle(Exception::StoreFault);
                         return;
                     }
@@ -437,7 +436,7 @@ impl Hazard3 {
                     Ok(status) => {
                         self.state = State::BusWaitLoad(to_register, status);
                     }
-                    Err(e) => {
+                    Err(_e) => {
                         self.trap_handle(Exception::LoadFault);
                         return;
                     }
@@ -479,9 +478,9 @@ mod tests {
     }
 
     #[test]
-    fn test_lui_and_delayed_M_stage() {
+    fn test_lui_and_delayed_m_stage() {
         setup!(cpu, ctx);
-        ctx.bus.sram.write_u32(0, 0x0ffff0b7); // lui x1, 65535
+        ctx.bus.sram.write_u32(0, 0x0ffff0b7).unwrap(); // lui x1, 65535
         cpu.registers.x[1] = 0x1234;
         cpu.tick(&mut ctx);
         assert_eq!(cpu.pc, SRAM + 4);
@@ -498,7 +497,7 @@ mod tests {
     #[test]
     fn test_write_x0() {
         setup!(cpu, ctx);
-        ctx.bus.sram.write_u32(0, 0x0ffff037); // lui x0, 65535
+        ctx.bus.sram.write_u32(0, 0x0ffff037).unwrap(); // lui x0, 65535
         cpu.tick(&mut ctx);
         assert_eq!(cpu.registers.x[0], 0);
         assert!(cpu.xx_bypass.is_none());

@@ -32,6 +32,7 @@ pub struct PadsBank0 {
 
 impl Peripheral for PadsBank0 {
     fn read(&self, address: u16, ctx: &PeripheralAccessContext) -> PeripheralResult<u32> {
+        log::info!("PadsBank0::read: address=0x{:04x}", address,);
         let value = match address {
             GPIO_START..=GPIO_END => {
                 let index = (address - GPIO_START) / GPIO_STEP;

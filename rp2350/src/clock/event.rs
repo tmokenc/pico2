@@ -9,6 +9,7 @@ use core::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum EventType {
     DmaChannelTimer(usize),
+    RiscVTimer,
     Pwm(usize),
     UartTx(usize),
     UartRx(usize),
@@ -20,6 +21,7 @@ impl fmt::Display for EventType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             EventType::DmaChannelTimer(ch) => write!(f, "DMA Channel {}", ch),
+            EventType::RiscVTimer => write!(f, "RISC-V Timer"),
             EventType::Sha256 => write!(f, "SHA256"),
             EventType::UartTx(ch) => write!(f, "UART Tx {}", ch),
             EventType::UartRx(ch) => write!(f, "UART Rx {}", ch),

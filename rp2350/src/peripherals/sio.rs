@@ -1,9 +1,11 @@
+use self::timer::update_timer_ctrl;
+
 /**
  * @file peripherals/sio.rs
  * @author Nguyen Le Duy
  * @date 22/01/2025
  * @brief SIO peripheral module for the RP2350
- * @todo Timer
+ * @todo TMDS
  */
 use super::*;
 
@@ -26,9 +28,10 @@ use tmds::TmdsEncoder;
 pub struct Sio {
     mailboxes: RefCell<Mailboxes>,
     spinlock: SpinLock,
-    timer: [RiscVPlatformTimer; 2],
+    timer: Rc<RefCell<RiscVPlatformTimer>>,
     interpolator0: [RefCell<Interpolator<0>>; 2],
     interpolator1: [RefCell<Interpolator<1>>; 2],
+    #[allow(dead_code)] // To be implemented
     tmds: [TmdsEncoder; 2],
 
     gpio_value: u32,
@@ -40,7 +43,7 @@ impl Sio {
         Self {
             mailboxes: RefCell::new(Mailboxes::default()),
             spinlock: SpinLock::default(),
-            timer: [RiscVPlatformTimer::default(), RiscVPlatformTimer::default()],
+            timer: Rc::new(RefCell::new(RiscVPlatformTimer::default())),
             interpolator0: [Default::default(), Default::default()],
             interpolator1: [Default::default(), Default::default()],
             tmds: [TmdsEncoder::default(), TmdsEncoder::default()],
@@ -146,6 +149,7 @@ impl Peripheral for Sio {
     fn read(&self, address: u16, ctx: &PeripheralAccessContext) -> PeripheralResult<u32> {
         let mut interpolator0 = self.interpolator0[ctx.requestor as usize].borrow_mut();
         let mut interpolator1 = self.interpolator1[ctx.requestor as usize].borrow_mut();
+        let timer = self.timer.borrow();
 
         let value = match address {
             CPUID => match ctx.requestor {
@@ -204,7 +208,7 @@ impl Peripheral for Sio {
             INTERPO_CTRL_LANE1 => interpolator0.ctrl[1],
             INTERPO_ACCUM0_ADD => interpolator0.sm_result[0],
             INTERPO_ACCUM1_ADD => interpolator0.sm_result[1],
-            // INTERPO_BASE_1AND0 => 
+            // INTERPO_BASE_1AND0 =>
             INTERP1_ACCUM0 => interpolator1.accum[0],
             INTERP1_ACCUM1 => interpolator1.accum[1],
             INTERP1_BASE0 => interpolator1.base[0],
@@ -234,13 +238,15 @@ impl Peripheral for Sio {
             INTERP1_ACCUM1_ADD => interpolator1.sm_result[1],
             // INTERP1_BASE_1AND0
 
-            | PERI_NONSEC  // TODO
+            MTIME_CTRL => timer.ctrl as u32,
+            MTIME => timer.counter as u32,
+            MTIMEH => (timer.counter >> 32) as u32,
+            MTIMECMP => timer.cmp as u32,
+            MTIMECMPH => (timer.cmp >> 32) as u32,
+
+
+            PERI_NONSEC  // TODO
             | RISCV_SOFTIRQ
-            | MTIME_CTRL
-            | MTIME
-            | MTIMEH
-            | MTIMECMP
-            | MTIMECMPH
             | TMDS_CTRL
             | TMDS_WDATA
             | TMDS_PEEK_SINGLE
@@ -278,6 +284,7 @@ impl Peripheral for Sio {
     ) -> PeripheralResult<()> {
         let mut interpolator0 = self.interpolator0[ctx.requestor as usize].borrow_mut();
         let mut interpolator1 = self.interpolator1[ctx.requestor as usize].borrow_mut();
+        let mut timer = self.timer.borrow_mut();
 
         let old_gpio_value = self.gpio_value;
         let old_gpio_output_enable = self.gpio_output_enable;
@@ -426,14 +433,29 @@ impl Peripheral for Sio {
             INTERP1_BASE_1AND0 => {
                 interpolator1.set_base01(value);
             }
+            MTIME_CTRL => {
+                drop(timer);
+                update_timer_ctrl(self.timer.clone(), value as u8, ctx);
+            }
+            MTIME => {
+                timer.counter = (timer.counter & 0xFFFF_FFFF_0000_0000) | value as u64;
+                timer.update_interrupt(ctx.interrupts.clone());
+            }
+            MTIMEH => {
+                timer.counter = (timer.counter & 0x0000_0000_FFFF_FFFF) | ((value as u64) << 32);
+                timer.update_interrupt(ctx.interrupts.clone());
+            }
+            MTIMECMP => {
+                timer.cmp = (timer.cmp & 0xFFFF_FFFF_0000_0000) | value as u64;
+                timer.update_interrupt(ctx.interrupts.clone());
+            }
+            MTIMECMPH => {
+                timer.cmp = (timer.cmp & 0x0000_0000_FFFF_FFFF) | ((value as u64) << 32);
+                timer.update_interrupt(ctx.interrupts.clone());
+            }
 
             PERI_NONSEC // TODO
             | RISCV_SOFTIRQ
-            | MTIME_CTRL
-            | MTIME
-            | MTIMEH
-            | MTIMECMP
-            | MTIMECMPH
             | TMDS_CTRL
             | TMDS_WDATA
             | TMDS_PEEK_SINGLE

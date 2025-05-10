@@ -51,10 +51,4 @@ impl Pico2 {
             LedState::Off
         }
     }
-
-    pub fn set_gpio(&mut self, index: u8, value: bool) {
-        assert!(index < 30, "Invalid GPIO pin index: {}", index);
-        let mut gpio = self.mcu.gpio.borrow_mut();
-        gpio.set_pin_input(index, value);
-    }
 }

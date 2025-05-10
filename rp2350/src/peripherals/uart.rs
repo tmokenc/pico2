@@ -111,7 +111,7 @@ impl<const IDX: usize> Default for Uart<IDX> {
 
             baud_divint: 0,
             baud_divfrac: 0,
-            ctrl: CTRL_RXE | CTRL_TXE | CTRL_UARTEN,
+            ctrl: CTRL_RXE | CTRL_TXE,
             line_ctrl: 0,
             flags: FLAG_TXFE | FLAG_RXFE,
             fifo_level_select: (0x2 << 3) | 0x2,
@@ -182,7 +182,7 @@ impl<const IDX: usize> Uart<IDX> {
             baud_fbrd = 0;
         }
 
-        let clock = 48 * MHZ;
+        let clock = 150 * MHZ;
         let baudrate = (4 * clock) / (64 * baud_ibrd + baud_fbrd);
         baudrate as u32
     }

@@ -77,6 +77,13 @@ impl Rp2350Core {
         }
     }
 
+    pub fn get_pc(&self) -> u32 {
+        match self {
+            Self::Arm(core) => core.get_pc(),
+            Self::RiscV(core) => core.get_pc(),
+        }
+    }
+
     pub fn set_sp(&mut self, value: u32) {
         match self {
             Self::Arm(core) => core.set_sp(value),

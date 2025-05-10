@@ -57,6 +57,15 @@ impl<T: Default, const N: usize> Fifo<T, N> {
         Some(value)
     }
 
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        let start = (self.head + N - self.size) % N;
+
+        (0..self.size).map(move |i| {
+            let index = (start + i) % N;
+            &self.data[index]
+        })
+    }
+
     pub fn len(&self) -> usize {
         self.size
     }

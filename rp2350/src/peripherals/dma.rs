@@ -158,6 +158,19 @@ impl Dma {
         self.write(bus);
     }
 
+    fn add_channel_to_round_robin(&mut self, channel_idx: usize) {
+        if self
+            .channel_round_robin
+            .iter()
+            .any(|&idx| idx == channel_idx)
+        {
+            return;
+        }
+
+        // cannot fail
+        let _ = self.channel_round_robin.push(channel_idx);
+    }
+
     fn read(&mut self, bus: &mut Bus) {
         if self
             .current_read
@@ -177,7 +190,7 @@ impl Dma {
             };
 
             if self.channels[idx].is_enabled() && self.channels[idx].busy() {
-                let _ = self.channel_round_robin.push(idx); // TODO correct???
+                self.add_channel_to_round_robin(idx);
 
                 if *self.channels[idx].ready_to_transfer.borrow() {
                     channel_idx = Some(idx);
@@ -316,6 +329,7 @@ impl Dma {
 
     fn start_channel(&mut self, channel_idx: usize, clock: Rc<Clock>) {
         let ref mut channel = self.channels[channel_idx];
+        let transfer_count = channel.transfer_count;
 
         if !channel.is_enabled() || channel.busy() {
             return;
@@ -323,9 +337,9 @@ impl Dma {
 
         channel.set_busy(true);
         channel.transfer_count = channel.transfer_counter_reload;
-        self.channel_round_robin.push(channel_idx);
+        self.add_channel_to_round_robin(channel_idx);
 
-        if channel.transfer_count > 0 {
+        if transfer_count > 0 {
             self.schedule_transfer(channel_idx, Rc::clone(&clock));
         }
     }

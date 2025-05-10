@@ -165,7 +165,7 @@ impl<const IDX: usize> I2c<IDX> {
 }
 
 impl<const IDX: usize> Peripheral for Rc<RefCell<I2c<IDX>>> {
-    fn read(&self, address: u16, ctx: &PeripheralAccessContext) -> PeripheralResult<u32> {
+    fn read(&self, address: u16, _ctx: &PeripheralAccessContext) -> PeripheralResult<u32> {
         let mut i2c = self.borrow_mut();
 
         let value = match address {
@@ -221,7 +221,7 @@ impl<const IDX: usize> Peripheral for Rc<RefCell<I2c<IDX>>> {
         &mut self,
         address: u16,
         value: u32,
-        ctx: &PeripheralAccessContext,
+        _ctx: &PeripheralAccessContext,
     ) -> PeripheralResult<()> {
         let mut i2c = self.borrow_mut();
         match address {

@@ -40,6 +40,10 @@ pub const MSTATUS32_SD: u32 = 0x80000000;
 
 pub const MIP_MEIP: u16 = 1 << 11; // TODO correctly handle this
 pub const MIE_MEIE: u32 = 1 << 11;
+pub const MIE_MTIE: u32 = 1 << 7;
+pub const MIE_MSIE: u32 = 1 << 3;
+pub const MIP_MTIP: u16 = 1 << 7;
+pub const MIP_MSIP: u16 = 1 << 3;
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrivilegeMode {
@@ -288,30 +292,6 @@ impl Csrs {
         }
     }
 
-    pub(super) fn set_trap(&mut self, trap: Trap) {
-        let mut cause;
-
-        match trap {
-            Trap::Exception(ex) => match ex {
-                Exception::InstructionAlignment => cause = 0,
-                Exception::InstructionFetchFault => cause = 1,
-                Exception::IllegalInstruction => cause = 2,
-                Exception::BreakPoint => cause = 3,
-                Exception::LoadAlignment => cause = 4,
-                Exception::LoadFault => cause = 5,
-                Exception::StoreAlignment => cause = 6,
-                Exception::StoreFault => cause = 7,
-                Exception::EcallUMode => cause = 8,
-                Exception::EcallMMode => cause = 9,
-            },
-            Trap::Interrupt(int) => {
-                cause = int as u32;
-            }
-        }
-
-        // Set the cause in the mcause register
-        self.mcause = cause | (self.mcause & 0x8000_0000);
-    }
     pub(super) fn read(&self, offset: u16) -> Result<u32, Exception> {
         log::info!("read csr: {:#x}", offset);
 
@@ -637,27 +617,55 @@ impl Csrs {
         }
     }
 
-    // Check for interrupt and return the handling address if needed
-    pub(super) fn interrupt_check(
-        &mut self,
-        _pc: u32,
-        _irq: Rc<RefCell<Interrupts>>,
-    ) -> Option<u32> {
-        // TODO
-        None
-        // ux_t m_targeted_irqs = get_effective_xip() & mie;
-        // bool take_m_irq = m_targeted_irqs && ((mstatus & MSTATUS_MIE) || priv < PRV_M);
-        // if (take_m_irq) {
-        // 	ux_t cause = (1u << 31) | __builtin_ctz(m_targeted_irqs);
-        // 	return trap_enter(cause, xepc);
-        // } else {
-        // 	return std::nullopt;
-        // }
+    fn irq_enabled(&self) -> bool {
+        (self.mstatus & MSTATUS_MIE) != 0
     }
 
-    // effective xip
-    // return mip |
-    // 	(irq_s ? MIP_MSIP : 0) |
-    // 	(irq_t ? MIP_MTIP : 0) |
-    // 	(irq_e ? MIP_MEIP : 0);
+    fn external_irq_enabled(&self) -> bool {
+        // mie.meie, mip.meip
+        (self.mie & MIE_MEIE) != 0
+    }
+
+    fn timer_irq_enabled(&self) -> bool {
+        // mie.mtie, mip.mtip
+        (self.mie & MIE_MTIE) != 0
+    }
+
+    fn _software_irq_enabled(&self) -> bool {
+        // mie.msie, mip.msie
+        (self.mie & MIE_MSIE) != 0
+    }
+
+    // Check for interrupt and return the handling address if needed
+    pub(super) fn interrupt_check(&mut self, pc: u32, irq: Rc<RefCell<Interrupts>>) -> Option<u32> {
+        if !self.irq_enabled() || self.privilege_mode != PrivilegeMode::Machine {
+            return None;
+        }
+
+        // Transfering interrupts to the core
+        let irq = irq.borrow();
+        let mut irq = irq.iter(self.core_id);
+
+        let Some(next_irq) = irq.next() else {
+            // No interrupt pending
+            self.mip &= !MIP_MEIP; // clear external interrupt
+            self.mip &= !MIP_MTIP; // clear timer interrupt
+            self.mip &= !MIP_MSIP; // clear software interrupt
+            return None;
+        };
+
+        if next_irq == Interrupts::SIO_IRQ_MTIMECMP {
+            if self.timer_irq_enabled() {
+                self.mip |= MIP_MTIP;
+            }
+        } else {
+            if self.external_irq_enabled() {
+                self.mip |= MIP_MEIP;
+            }
+        }
+
+        // Actually handling interrupt if needed
+        Some(self.trap_handle(Trap::Interrupt(next_irq), pc))
+        // TODO xh3 interrupt routine, tried it but it does not work
+    }
 }

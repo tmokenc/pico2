@@ -157,6 +157,7 @@ impl Peripheral for Rc<RefCell<Sha256>> {
                     inner.sum = result.into();
                     inner.sum_vld = true;
                     inner.writed_count = 0;
+                    inner.wdata_rdy = true;
                 });
             }
             SUM0 | SUM1 | SUM2 | SUM3 | SUM4 | SUM5 | SUM6 | SUM7 => { /* Read Only */ }

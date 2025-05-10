@@ -52,6 +52,10 @@ impl<const N: usize> GenericMemory<N> {
         }
     }
 
+    pub fn len(&self) -> usize {
+        N
+    }
+
     pub fn write_slice(&mut self, address: u32, data: &[u8]) -> MemoryResult<()> {
         let address = address as usize;
         // Check if the address is out of bounds

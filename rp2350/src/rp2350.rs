@@ -105,10 +105,10 @@ impl Rp2350 {
             let address = block.target_addr;
 
             let result = match address & 0xF000_0000 {
-                Bus::XIP => self
-                    .bus
-                    .flash
-                    .write_slice(address & bus::XIP_ADDRESS_MASK, &block.data),
+                Bus::XIP => {
+                    let address = address & bus::XIP_ADDRESS_MASK;
+                    self.bus.flash.write_slice(address, &block.data)
+                }
                 Bus::SRAM => self.bus.sram.write_slice(address - Bus::SRAM, &block.data),
                 _ => {
                     log::warn!("Unsupported target address: {:#X}", block.target_addr);
@@ -123,9 +123,9 @@ impl Rp2350 {
 
         // Dump of the data section
         // This does not include from the uf2
+        self.reset();
         let data_section = include_bytes!("../data.bin");
         self.bus.set_sram(data_section);
-        self.reset();
 
         self.inspector.emit(InspectionEvent::FlashedBinary);
 
@@ -168,14 +168,13 @@ impl Rp2350 {
     }
 
     pub fn skip_bootrom(&mut self) {
-        // self.processor[0].set_pc(0x1000_0086);
-        // self.processor[1].set_pc(0x1000_0086);
-        self.processor[0].set_pc(0x1000_008a);
-        self.processor[1].set_pc(0x1000_008a);
-        // 0x20002c44 add something to this in SRAM for AMOOR.W
-        // 0x20000134
+        self.processor[0].set_pc(0x1000_0086);
+        self.processor[1].set_pc(0x1000_0086);
         self.bus.sram.write_u32(0x0002c44, 0x20002c54).ok();
-        self.bus.sram.write_u32(0x0000134, 0x20002c54).ok();
+        self.bus.sram.write_u32(0x0000134, 0x20002c64).ok();
+        self.bus.sram.write_u32(0x0000144, 0x20002c74).ok();
+        self.bus.sram.write_u32(0x0000134 + 12, 0x20002c94).ok();
+        self.bus.sram.write_u32(0x0000053c, 0x20002c84).ok();
 
         // dumped registers
         let regs = [
@@ -186,11 +185,35 @@ impl Rp2350 {
             0x00000001, 0x00000000, 0x00006aac, 0x000074d6,
         ];
 
-        for (i, &reg) in regs.iter().enumerate() {
+        for (i, &reg) in regs.iter().enumerate().take(3) {
             self.processor[0].set_register(i as u8, reg);
             self.processor[1].set_register(i as u8, reg);
         }
 
         self.processor[1].sleep();
+    }
+
+    pub fn set_gpio_pin_input(&self, pin_index: u8, value: bool) {
+        assert!(pin_index < 30, "Invalid GPIO pin index: {}", pin_index);
+        let mut gpio = self.gpio.borrow_mut();
+
+        if let Some(pin) = gpio.get_pin_mut(pin_index) {
+            let irq_check = pin.set_input(value);
+            if irq_check {
+                gpio.update_interrupt();
+
+                // update for PWM
+                drop(gpio); // avoid deadlock
+                let clock = self.clock.clone();
+                let gpio = self.gpio.clone();
+                let pwm = self.bus.peripherals.pwm.clone();
+                let interrupts = self.interrupts.clone();
+                let inspector = self.inspector.clone();
+
+                crate::gpio::update_pwm_b_pin(
+                    pin_index, value, pwm, clock, gpio, interrupts, inspector,
+                );
+            }
+        }
     }
 }

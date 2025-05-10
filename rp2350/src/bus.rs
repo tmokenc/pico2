@@ -181,7 +181,11 @@ impl Bus {
         self.rom = GenericMemory::new(&data);
     }
 
-    pub fn set_sram(&mut self, data: &[u8]) {
+    pub fn set_sram(&mut self, mut data: &[u8]) {
+        if data.len() > 520 * KB {
+            data = &data[..(520 * KB)]; // truncate to 520KB
+        }
+
         if let Err(why) = self.sram.write_slice(0, data) {
             log::error!("Failed to write SRAM: {why:?}");
         }

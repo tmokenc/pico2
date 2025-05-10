@@ -14,8 +14,11 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use crate::clock::Clock;
 use crate::interrupts::Interrupts;
+use crate::peripherals::Pwm;
 use crate::utils::extract_bit;
+use crate::InspectorRef;
 
 pub use drive_strength::*;
 pub use function_select::*;
@@ -24,12 +27,6 @@ pub use r#override::*;
 pub use state::*;
 
 type PinIndex = u8;
-
-pub enum GpioFunction {
-    Input,
-    Output,
-    AltFunction,
-}
 
 const IRQ_LEVEL_LOW: u8 = 1 << 0;
 const IRQ_LEVEL_HIGH: u8 = 1 << 1;
@@ -145,7 +142,8 @@ impl GpioController {
         let funcsel = pin.func_sel();
         let raw_output = self.raw_output(funcsel, index);
 
-        let output_enable = pin.oe_override().apply_bool(raw_output.enable);
+        let output_enable =
+            pin.oe_override().apply_bool(raw_output.enable) && !pin.output_disable();
         let output_value = pin.out_override().apply_bool(raw_output.value);
 
         if output_enable {
@@ -161,15 +159,6 @@ impl GpioController {
                 (true, false) => PinState::Input(InputState::PullUp),
                 (false, true) => PinState::Input(InputState::PullDown),
                 (false, false) => PinState::Input(InputState::Floating),
-            }
-        }
-    }
-
-    pub fn set_pin_input(&mut self, index: u8, value: bool) {
-        if let Some(pin) = self.get_pin_mut(index) {
-            let irq_check = pin.set_input(value);
-            if irq_check {
-                self.update_interrupt();
             }
         }
     }
@@ -221,4 +210,36 @@ impl GpioController {
             .borrow_mut()
             .set_irq(Interrupts::IQ_IRQ_BANK0, interrupt);
     }
+}
+
+pub(crate) fn update_pwm_b_pin(
+    mut pin_index: u8,
+    pin_state: bool,
+    pwm: Rc<RefCell<Pwm>>,
+    clock_ref: Rc<Clock>,
+    gpio_ref: Rc<RefCell<GpioController>>,
+    interrupts_ref: Rc<RefCell<Interrupts>>,
+    inspector: InspectorRef,
+) {
+    if pin_index & 1 == 0 {
+        // Channel A
+        return;
+    }
+
+    if pin_index > 15 {
+        // pwm channels is repeated for each 16 pins
+        pin_index -= 16;
+    }
+
+    let channel_idx = pin_index / 2;
+
+    crate::peripherals::pwm::channel_b_update(
+        pwm,
+        channel_idx as usize,
+        pin_state,
+        clock_ref,
+        gpio_ref,
+        interrupts_ref,
+        inspector,
+    );
 }
