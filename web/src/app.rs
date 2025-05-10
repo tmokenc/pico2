@@ -6,6 +6,7 @@
  */
 mod boot_ram;
 mod boot_rom;
+pub(crate) mod disassembler;
 mod editor;
 mod field;
 mod flash;
@@ -51,6 +52,7 @@ pub enum Window {
     // Base
     Editor,
     Field,
+    Disassembler,
 
     // Processor Cores
     Core0,
@@ -95,6 +97,7 @@ pub struct App {
     example: usize,
 
     editor: editor::CodeEditor,
+    disassembler: Rc<RefCell<disassembler::Disassembler>>,
     // components
     core0: processor_core::ProcessorCore<0>,
     core1: processor_core::ProcessorCore<1>,
@@ -121,6 +124,7 @@ impl TabViewer for App {
         let title = match tab {
             Window::Editor => "Editor",
             Window::Field => "Field",
+            Window::Disassembler => "Disassembler",
             Window::Core0 => "Core 0",
             Window::Core1 => "Core 1",
             Window::BootRom => "Boot ROM",
@@ -179,6 +183,11 @@ impl TabViewer for App {
                         drop(pico2); // avoid borrow checker issues
                         self.editor.ui(ui, self.send_task.as_mut().unwrap());
                     }
+                    Window::Disassembler => {
+                        if let Ok(mut disassembler) = self.disassembler.try_borrow_mut() {
+                            disassembler.ui(ui, rp2350);
+                        }
+                    }
                     Window::Field => self.field.ui(ui, rp2350),
                     Window::Core0 => self.core0.ui_with_tracker(ui, rp2350, self.tracker.clone()),
                     Window::Core1 => self.core1.ui_with_tracker(ui, rp2350, self.tracker.clone()),
@@ -227,6 +236,7 @@ impl Window {
         match self {
             Window::Editor => "Editor",
             Window::Field => "Field",
+            Window::Disassembler => "Disassembler",
             Window::Core0 => "Core 0",
             Window::Core1 => "Core 1",
             Window::BootRom => "Boot ROM",
@@ -309,7 +319,12 @@ impl SimulatorApp {
 
         let pico2 = Rc::clone(&app.app.pico2);
         let is_running = Rc::clone(&app.app.is_running);
-        let sender = crate::simulator::run_pico2_sim(cc.egui_ctx.clone(), pico2, is_running);
+        let sender = crate::simulator::run_pico2_sim(
+            cc.egui_ctx.clone(),
+            pico2,
+            is_running,
+            app.app.disassembler.clone(),
+        );
         app.app.send_task = Some(sender);
 
         return app;
@@ -382,7 +397,11 @@ impl SimulatorApp {
             {
                 self.stop();
                 log::info!("Import clicked");
-                crate::simulator::pick_file_into_pico2(ui.ctx().clone(), self.app.pico2.clone());
+                crate::simulator::pick_file_into_pico2(
+                    ui.ctx().clone(),
+                    self.app.pico2.clone(),
+                    self.app.editor.skip_bootrom,
+                );
                 // TODO
             }
 
@@ -451,7 +470,7 @@ impl SimulatorApp {
                     ui,
                     egui::include_image!("../assets/processor.svg"),
                     "Processor Core",
-                    &[Window::Core0, Window::Core1],
+                    &[Window::Core0, Window::Core1, Window::Disassembler],
                 );
 
                 self.side_panel_collapsing(

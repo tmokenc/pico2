@@ -258,6 +258,7 @@ fn show_processor_tracker<const T: usize>(ui: &mut egui::Ui, tracker: &Processor
             .column(Column::exact(100.0))
             .min_scrolled_height(200.0)
             .max_scroll_height(200.0) // 10 rows
+            .stick_to_bottom(true)
             .header(20.0, |mut header| {
                 header.col(|ui| {
                     ui.label(RichText::new("Name").strong());

@@ -1,3 +1,4 @@
+use crate::app::disassembler::Disassembler;
 /**
  * @file simulator.rs
  * @author Nguyen Le Duy
@@ -24,7 +25,11 @@ pub enum TaskCommand {
     FlashCode(Language, String, ShoulSkipBootrom),
 }
 
-pub fn pick_file_into_pico2(ctx: Context, pico2: Rc<RefCell<Pico2>>) {
+pub fn pick_file_into_pico2(
+    ctx: Context,
+    pico2: Rc<RefCell<Pico2>>,
+    skip_bootrom: ShoulSkipBootrom,
+) {
     let file_picker = rfd::AsyncFileDialog::new();
     log::info!("Opening file picker");
 
@@ -38,16 +43,18 @@ pub fn pick_file_into_pico2(ctx: Context, pico2: Rc<RefCell<Pico2>>) {
         let file_name = file.file_name();
         log::info!("Selected file: {}", file_name);
 
+        let mut pico2 = pico2.borrow_mut();
+
         if file_name.ends_with(".bin") {
             log::info!("Flashing bin file");
             let file = file.read().await;
-            if let Err(why) = pico2.borrow_mut().flash_bin(&file) {
+            if let Err(why) = pico2.flash_bin(&file) {
                 log::error!("Failed to flash bin file: {}", why);
             }
         } else if file_name.ends_with(".uf2") {
             log::info!("Flashing uf2 file");
             let file = file.read().await;
-            if let Err(why) = pico2.borrow_mut().flash_uf2(&file) {
+            if let Err(why) = pico2.flash_uf2(&file) {
                 log::error!("Failed to flash uf2 file: {}", why);
             }
         } else {
@@ -55,15 +62,28 @@ pub fn pick_file_into_pico2(ctx: Context, pico2: Rc<RefCell<Pico2>>) {
             return;
         }
 
+        if skip_bootrom {
+            pico2.skip_bootrom();
+        }
+
+        drop(pico2);
+
         ctx.request_repaint();
     })
 }
 
-async fn compile_source_code(lang: Language, code: &str) -> Result<Vec<u8>, String> {
+struct CompilationResult {
+    uf2: Vec<u8>,
+    disassembler: String,
+}
+
+async fn compile_source_code(lang: Language, code: &str) -> Result<CompilationResult, String> {
     // The code maybe in a cache, so it may complete immediately
     let id = match crate::api::compile(lang, code).await? {
         CompilationResponse::InProgress { id } => id,
-        CompilationResponse::Done { uf2 } => return Ok(uf2),
+        CompilationResponse::Done { uf2, disassembler } => {
+            return Ok(CompilationResult { uf2, disassembler })
+        }
         CompilationResponse::Error { message } => return Err(message),
     };
 
@@ -71,9 +91,9 @@ async fn compile_source_code(lang: Language, code: &str) -> Result<Vec<u8>, Stri
         // Check the status of the compilation
         let status_request = crate::api::compilation_result(&id).await?;
         match status_request {
-            CompilationResponse::Done { uf2 } => {
+            CompilationResponse::Done { uf2, disassembler } => {
                 log::info!("Compilation done");
-                return Ok(uf2);
+                return Ok(CompilationResult { uf2, disassembler });
             }
             CompilationResponse::Error { message } => {
                 log::error!("Compilation error: {}", message);
@@ -88,10 +108,16 @@ async fn compile_source_code(lang: Language, code: &str) -> Result<Vec<u8>, Stri
     }
 }
 
-async fn flash_code(pico2: Rc<RefCell<Pico2>>, lang: Language, code: &str, skip_bootrom: bool) {
+async fn flash_code(
+    pico2: Rc<RefCell<Pico2>>,
+    lang: Language,
+    code: &str,
+    skip_bootrom: bool,
+    disassembler: &Rc<RefCell<Disassembler>>,
+) {
     // TODO add a loading spinner
-    let uf2 = match compile_source_code(lang, code).await {
-        Ok(uf2) => uf2,
+    let res = match compile_source_code(lang, code).await {
+        Ok(res) => res,
         Err(err) => {
             log::error!("Failed to compile code: {}", err);
             // TODO show error message in the UI
@@ -100,7 +126,7 @@ async fn flash_code(pico2: Rc<RefCell<Pico2>>, lang: Language, code: &str, skip_
     };
 
     let mut mcu = pico2.borrow_mut();
-    if let Err(why) = mcu.flash_uf2(&uf2) {
+    if let Err(why) = mcu.flash_uf2(&res.uf2) {
         log::error!("Failed to flash uf2 file: {}", why);
         // TODO show error message in the UI
         return;
@@ -110,6 +136,8 @@ async fn flash_code(pico2: Rc<RefCell<Pico2>>, lang: Language, code: &str, skip_
         mcu.skip_bootrom();
     }
 
+    disassembler.borrow_mut().add_file(&res.disassembler);
+
     // TODO add a message to the UI
 }
 
@@ -117,6 +145,7 @@ pub fn run_pico2_sim(
     ctx: Context,
     pico2: Rc<RefCell<Pico2>>,
     is_running: Rc<RefCell<bool>>,
+    disassembler: Rc<RefCell<Disassembler>>,
 ) -> Sender<TaskCommand> {
     let (tx, mut rx): (Sender<TaskCommand>, Receiver<TaskCommand>) = channel(4);
 
@@ -127,9 +156,20 @@ pub fn run_pico2_sim(
         loop {
             if *is_running.borrow() {
                 now = time::Instant::now();
-                pico2.borrow_mut().step();
-
                 request_repaint -= 1;
+
+                {
+                    let mut pico2 = pico2.borrow_mut();
+                    pico2.step();
+                    let pc0 = pico2.processor[0].get_pc();
+                    let pc1 = pico2.processor[1].get_pc();
+                    drop(pico2);
+                    let mut disassembler = disassembler.borrow();
+                    if disassembler.has_breakpoint(&pc0) || disassembler.has_breakpoint(&pc1) {
+                        drop(disassembler);
+                        *is_running.borrow_mut() = false;
+                    }
+                }
 
                 if request_repaint == 0 {
                     // Request repaint every 5 steps in running mode
@@ -161,7 +201,7 @@ pub fn run_pico2_sim(
                             Some(TaskCommand::Pause) => *is_running.borrow_mut() = false,
                             Some(TaskCommand::FlashCode(language, code, skip_bootrom)) => {
                                 *is_running.borrow_mut() = false;
-                                flash_code(pico2.clone(), language, &code, skip_bootrom).await;
+                                flash_code(pico2.clone(), language, &code, skip_bootrom, &disassembler).await;
                             }
                             _ => {}
                         }
@@ -174,7 +214,8 @@ pub fn run_pico2_sim(
                     Some(TaskCommand::Stop) => pico2.borrow_mut().reset(),
                     Some(TaskCommand::Pause) => *is_running.borrow_mut() = false,
                     Some(TaskCommand::FlashCode(language, code, skip_bootrom)) => {
-                        flash_code(pico2.clone(), language, &code, skip_bootrom).await;
+                        flash_code(pico2.clone(), language, &code, skip_bootrom, &disassembler)
+                            .await;
                     }
                     None => {}
                 }

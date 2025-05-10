@@ -69,7 +69,7 @@ impl Default for TrackerInner {
 
 impl Inspector for Tracker {
     fn handle_event(&self, event: InspectionEvent) {
-        LoggerInspector.handle_event(event.clone());
+        // LoggerInspector.handle_event(event.clone());
 
         let mut inner = self.0.borrow_mut();
 
