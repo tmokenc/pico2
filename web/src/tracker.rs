@@ -32,6 +32,7 @@ pub struct ProcessorTracker {
     pub inst_count: u64,
     pub instruction_count: HashMap<&'static str, u64>,
     pub instruction_log: VecDeque<Instruction>,
+    pub ticks: u64,
 }
 
 pub struct UartTracker {
@@ -208,6 +209,11 @@ impl Inspector for Tracker {
                     size,
                 };
                 push_to_buffer(&mut bus.events, event, bus.max_buffer_size);
+            }
+
+            InspectionEvent::TickCore(idx) => {
+                let processor = &mut inner.processor[idx as usize];
+                processor.ticks += 1;
             }
 
             _ => {

@@ -12,15 +12,18 @@ use futures::stream::StreamExt;
 use rp2350::simulator::Pico2;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::{LazyLock, Mutex};
 
 type ShoulSkipBootrom = bool;
+
+static FLASHED_CODE: LazyLock<Mutex<Vec<u8>>> = LazyLock::new(|| Mutex::new(vec![]));
 
 pub enum TaskCommand {
     Run,
     Pause,
     Step,
     Stop,
-    FlashCode(Language, String, ShoulSkipBootrom),
+    FlashCode(Language, String, ShoulSkipBootrom, Rc<RefCell<bool>>),
 }
 
 pub fn pick_file_into_pico2(
@@ -55,6 +58,11 @@ pub fn pick_file_into_pico2(
             } else {
                 crate::notify::success("Flashed uf2 file successfully");
             }
+
+            // Save the flashed code to the global variable
+            let mut flashed_code = FLASHED_CODE.lock().unwrap();
+            flashed_code.clear();
+            flashed_code.extend_from_slice(&file);
         } else {
             crate::notify::error(format!("Unsupported file type: {}", file_name));
             return;
@@ -73,6 +81,30 @@ pub fn pick_file_into_pico2(
 struct CompilationResult {
     uf2: Vec<u8>,
     disassembler: String,
+}
+
+pub fn export_file() {
+    let file_picker = rfd::AsyncFileDialog::new()
+        .set_file_name("main.uf2")
+        .add_filter("UF2", &["uf2"])
+        .save_file();
+
+    wasm_bindgen_futures::spawn_local(async move {
+        let Some(file) = file_picker.await else {
+            crate::notify::warning("No file selected");
+            return;
+        };
+
+        let file_name = file.file_name();
+        crate::notify::info(format!("Selected file: {}", file_name));
+
+        let flashed_code = FLASHED_CODE.lock().unwrap();
+        if let Err(why) = file.write(&flashed_code).await {
+            crate::notify::error(format!("Failed to write to file: {}", why));
+        } else {
+            crate::notify::success("Exported code successfully");
+        }
+    });
 }
 
 async fn compile_source_code(lang: Language, code: &str) -> Result<CompilationResult, String> {
@@ -150,6 +182,7 @@ pub fn run_pico2_sim(
 
     wasm_bindgen_futures::spawn_local(async move {
         let mut request_repaint = 5;
+        let mut skipped_bootrom = false;
 
         loop {
             if *is_running.borrow() {
@@ -169,8 +202,8 @@ pub fn run_pico2_sim(
                 }
 
                 if request_repaint == 0 {
-                    // Request repaint every 9876 steps in running mode
-                    request_repaint = 9876;
+                    // Request repaint every 2000 steps in running mode
+                    request_repaint = 2000;
                     ctx.request_repaint();
                     // try to notify the async runtime to avoid blocking
                     yield_now().await;
@@ -179,12 +212,19 @@ pub fn run_pico2_sim(
                 match rx.try_next() {
                     Ok(Some(TaskCommand::Stop)) => {
                         *is_running.borrow_mut() = false;
+                        pico2.borrow_mut().reset();
+                        if skipped_bootrom {
+                            pico2.borrow_mut().skip_bootrom();
+                        }
                     }
                     Ok(Some(TaskCommand::Pause)) => *is_running.borrow_mut() = false,
-                    Ok(Some(TaskCommand::FlashCode(language, code, skip_bootrom))) => {
+                    Ok(Some(TaskCommand::FlashCode(language, code, skip_bootrom, is_flashing))) => {
                         *is_running.borrow_mut() = false;
+                        *is_flashing.borrow_mut() = true;
+                        skipped_bootrom = skip_bootrom;
                         flash_code(pico2.clone(), language, &code, skip_bootrom, &disassembler)
                             .await;
+                        *is_flashing.borrow_mut() = false;
                     }
                     _ => {}
                 }
@@ -192,11 +232,18 @@ pub fn run_pico2_sim(
                 match rx.next().await {
                     Some(TaskCommand::Run) => *is_running.borrow_mut() = true,
                     Some(TaskCommand::Step) => pico2.borrow_mut().step(),
-                    Some(TaskCommand::Stop) => pico2.borrow_mut().reset(),
+                    Some(TaskCommand::Stop) => {
+                        pico2.borrow_mut().reset();
+                        if skipped_bootrom {
+                            pico2.borrow_mut().skip_bootrom();
+                        }
+                    }
                     Some(TaskCommand::Pause) => *is_running.borrow_mut() = false,
-                    Some(TaskCommand::FlashCode(language, code, skip_bootrom)) => {
+                    Some(TaskCommand::FlashCode(language, code, skip_bootrom, is_flashing)) => {
+                        *is_flashing.borrow_mut() = true;
                         flash_code(pico2.clone(), language, &code, skip_bootrom, &disassembler)
                             .await;
+                        *is_flashing.borrow_mut() = false;
                     }
                     None => {}
                 }
@@ -207,35 +254,6 @@ pub fn run_pico2_sim(
     tx
 }
 
-/// A future that yields immediately when polled.
-/// This is useful for yielding control back to the executor
-/// without blocking the current task.
-/// Taken from embassy-futures
-/// https://github.com/embassy-rs/embassy/blob/f9f20ae2174cb26d0f8926207d179041cfec2d2e/embassy-futures/src/yield_now.rs#L29-L31
-// fn yield_now() -> impl Future<Output = ()> {
-//     YieldNowFuture { yielded: false }
-// }
 fn yield_now() -> impl Future<Output = ()> {
     gloo::timers::future::TimeoutFuture::new(0)
 }
-
-// #[must_use = "futures do nothing unless you `.await` or poll them"]
-// struct YieldNowFuture {
-//     yielded: bool,
-// }
-//
-// use std::pin::Pin;
-// use std::task::Poll;
-//
-// impl Future for YieldNowFuture {
-//     type Output = ();
-//     fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-//         if self.yielded {
-//             Poll::Ready(())
-//         } else {
-//             self.yielded = true;
-//             cx.waker().wake_by_ref();
-//             Poll::Pending
-//         }
-//     }
-// }

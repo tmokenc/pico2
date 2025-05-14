@@ -101,8 +101,7 @@ impl<const T: usize> ProcessorCore<T> {
                 ui.end_row();
 
                 // let excecuted_inst = hazard3.csrs.minstret;
-                let executed_cycles = hazard3.csrs.mcycles;
-                log::info!("Executed cycles: {executed_cycles}");
+                let executed_cycles = tracker.ticks;
 
                 ui.label("Executed");
                 ui.label(format!("{}", tracker.inst_count));

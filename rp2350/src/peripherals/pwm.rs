@@ -179,23 +179,36 @@ impl Peripheral for Rc<RefCell<Pwm>> {
                 }
             }
             EN => {
+                let mut to_start = Vec::new();
+                let mut to_stop = Vec::new();
+
                 for i in 0..NOF_CHANNEL {
                     if extract_bit(value, i as u32) == 1 {
                         pwm.channels[i].enable();
-                        start_channel(
-                            self.clone(),
-                            i,
-                            ctx.clock.clone(),
-                            ctx.gpio.clone(),
-                            ctx.interrupts.clone(),
-                            ctx.inspector.clone(),
-                        );
+                        to_start.push(i);
                     } else {
                         pwm.channels[i].disable();
-                        stop_channel(i, ctx.clock.clone());
+                        to_stop.push(i);
                     }
 
                     pwm.update_gpio(ctx.gpio.clone(), i);
+                }
+
+                drop(pwm);
+
+                for i in to_start {
+                    start_channel(
+                        self.clone(),
+                        i,
+                        ctx.clock.clone(),
+                        ctx.gpio.clone(),
+                        ctx.interrupts.clone(),
+                        ctx.inspector.clone(),
+                    );
+                }
+
+                for i in to_stop {
+                    stop_channel(i, ctx.clock.clone());
                 }
             }
             INTR => {

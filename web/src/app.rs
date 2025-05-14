@@ -416,7 +416,7 @@ impl SimulatorApp {
                 .add(self.top_panel_button(egui::include_image!("../assets/export.svg"), "Export"))
                 .clicked()
             {
-                // TODO
+                crate::simulator::export_file();
             }
 
             ui.add_space(100.0);

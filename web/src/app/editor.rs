@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use crate::simulator::TaskCommand;
 use api_types::Language;
 use egui::ComboBox;
@@ -14,16 +17,36 @@ pub const EXAMPLES: &[Example] = &[
         code: include_str!("../../assets/examples/uart.c"),
     },
     Example {
+        name: "Factorial",
+        code: include_str!("../../assets/examples/factorial.c"),
+    },
+    Example {
+        name: "SHA256",
+        code: include_str!("../../assets/examples/sha256.c"),
+    },
+    Example {
         name: "Blink",
         code: include_str!("../../assets/examples/blink.c"),
     },
     Example {
-        name: "DMA",
-        code: include_str!("../../assets/examples/dma.c"),
+        name: "PWM",
+        code: include_str!("../../assets/examples/pwm.c"),
+    },
+    Example {
+        name: "Multiple PWM",
+        code: include_str!("../../assets/examples/pwm_multi.c"),
+    },
+    Example {
+        name: "Timer Wait",
+        code: include_str!("../../assets/examples/timer_wait.c"),
     },
     Example {
         name: "GPIO",
         code: include_str!("../../assets/examples/gpio.c"),
+    },
+    Example {
+        name: "timer_alarm",
+        code: include_str!("../../assets/examples/timer_alarm.c"),
     },
     Example {
         name: "Multicore",
@@ -34,8 +57,8 @@ pub const EXAMPLES: &[Example] = &[
         code: include_str!("../../assets/examples/multicore_fifo_irq.c"),
     },
     Example {
-        name: "PWM",
-        code: include_str!("../../assets/examples/pwm.c"),
+        name: "DMA",
+        code: include_str!("../../assets/examples/dma.c"),
     },
     Example {
         name: "SPI",
@@ -57,6 +80,7 @@ pub struct CodeEditor {
     pub language: Language,
     pub code: String,
     pub skip_bootrom: bool,
+    pub is_flashing: Rc<RefCell<bool>>,
 }
 
 impl Default for CodeEditor {
@@ -65,6 +89,7 @@ impl Default for CodeEditor {
             language: Language::C,
             code: String::from(EXAMPLES[0].code),
             skip_bootrom: true,
+            is_flashing: Rc::new(RefCell::new(false)),
         }
     }
 }
@@ -75,6 +100,7 @@ impl CodeEditor {
             language,
             code,
             skip_bootrom,
+            is_flashing,
         } = self;
 
         ui.horizontal(|ui| {
@@ -88,16 +114,21 @@ impl CodeEditor {
 
             ui.add_space(30.0);
 
-            if ui
-                .button("Flash")
-                .on_hover_text("Flash the code to the Pico2")
-                .clicked()
-            {
-                let _ = tx.try_send(TaskCommand::FlashCode(
-                    language.clone(),
-                    code.clone(),
-                    *skip_bootrom,
-                ));
+            if *is_flashing.borrow() {
+                ui.spinner();
+            } else {
+                if ui
+                    .button("Flash")
+                    .on_hover_text("Flash the code to the Pico2")
+                    .clicked()
+                {
+                    let _ = tx.try_send(TaskCommand::FlashCode(
+                        language.clone(),
+                        code.clone(),
+                        *skip_bootrom,
+                        is_flashing.clone(),
+                    ));
+                }
             }
 
             ui.checkbox(skip_bootrom, "Skip Bootrom")
