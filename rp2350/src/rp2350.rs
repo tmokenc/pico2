@@ -174,8 +174,12 @@ impl Rp2350 {
         self.bus.sram.write_u32(0x0000134, 0x20002c64).ok();
         self.bus.sram.write_u32(0x0000144, 0x20002c74).ok();
         self.bus.sram.write_u32(0x0000134 + 12, 0x20002c94).ok();
-        self.bus.sram.write_u32(0x0000053c, 0x20002c84).ok();
-
+        self.bus.sram.write_u32(0x0000053c, 0x10000184).ok();
+        self.bus.sram.write_u32(0x00000414, 0x10000184).ok();
+        self.bus.sram.write_u32(0x00000400, 0x10000184).ok();
+        //self.bus.sram.write_u32(0x20000324, 0x10000184).ok();
+        // 0x20000324
+        // GP 20000D44
         // dumped registers
         let regs = [
             0x00000000, 0x1000021c, 0x20081f50, 0x20002580, 0x00000000, 0x10006620, 0x0000000f,
@@ -185,7 +189,7 @@ impl Rp2350 {
             0x00000001, 0x00000000, 0x00006aac, 0x000074d6,
         ];
 
-        for (i, &reg) in regs.iter().enumerate().take(3) {
+        for (i, &reg) in regs.iter().enumerate().take(4) {
             self.processor[0].set_register(i as u8, reg);
             self.processor[1].set_register(i as u8, reg);
         }

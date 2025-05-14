@@ -26,13 +26,13 @@ use tmds::TmdsEncoder;
 
 #[derive(Default)]
 pub struct Sio {
-    mailboxes: RefCell<Mailboxes>,
-    spinlock: SpinLock,
-    timer: Rc<RefCell<RiscVPlatformTimer>>,
-    interpolator0: [RefCell<Interpolator<0>>; 2],
-    interpolator1: [RefCell<Interpolator<1>>; 2],
+    pub mailboxes: RefCell<Mailboxes>,
+    pub spinlock: SpinLock,
+    pub timer: Rc<RefCell<RiscVPlatformTimer>>,
+    pub interpolator0: [RefCell<Interpolator<0>>; 2],
+    pub interpolator1: [RefCell<Interpolator<1>>; 2],
     #[allow(dead_code)] // To be implemented
-    tmds: [TmdsEncoder; 2],
+    pub tmds: [TmdsEncoder; 2],
 
     gpio_value: u32,
     gpio_output_enable: u32

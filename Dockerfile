@@ -17,11 +17,9 @@ RUN set -eux; \
 RUN pip install pycryptodome
 
 WORKDIR /opt/corev-openhw-gcc
+COPY resources/corev-openhw-gcc/corev-openhw-gcc.tar.gz /opt/corev-openhw-gcc/corev-openhw-gcc.tar.gz
+
 RUN set -eux; \
-    curl -fsSL \
-    https://buildbot.embecosm.com/job/corev-gcc-ubuntu2204/47/artifact/corev-openhw-gcc-ubuntu2204-20240530.tar.gz \
-        --output corev-openhw-gcc.tar.gz \
-    ; \
     tar -xf corev-openhw-gcc.tar.gz --strip-components=1; \
     rm corev-openhw-gcc.tar.gz
 ENV PATH=$PATH:/opt/corev-openhw-gcc/bin

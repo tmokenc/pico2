@@ -35,7 +35,7 @@ pub const IRQ1_INTF: u16 = 0x108; // Interrupt Force for irq1
 pub const IRQ1_INTS: u16 = 0x10C; // Interrupt status after masking & forcing for irq1
 
 const CHANNEL_OFFSET: u16 = 0x014; // Offset to the next channel
-const NOF_CHANNEL: usize = 12;
+pub const NOF_CHANNEL: usize = 12;
 
 #[derive(Default)]
 pub struct Pwm {
@@ -102,6 +102,7 @@ impl Pwm {
 
 impl Peripheral for Rc<RefCell<Pwm>> {
     fn read(&self, address: u16, _ctx: &PeripheralAccessContext) -> PeripheralResult<u32> {
+        log::info!("PWM read: {:#x}", address);
         let pwm = self.borrow();
 
         let value = match address {
@@ -149,12 +150,14 @@ impl Peripheral for Rc<RefCell<Pwm>> {
             0..=0x0ec => {
                 let index = address / CHANNEL_OFFSET;
                 let relative_offset = address % CHANNEL_OFFSET;
-                let mut channel = pwm.channels[index as usize];
+                let ref mut channel = pwm.channels[index as usize];
 
                 match relative_offset {
                     CHN_CSR => {
                         channel.update_csr(value as u8);
-                        if channel.is_enabled() {
+                        let is_channel_enabled = channel.is_enabled();
+                        pwm.update_gpio(ctx.gpio.clone(), index as usize);
+                        if is_channel_enabled {
                             drop(pwm);
                             start_channel(
                                 self.clone(),
@@ -191,6 +194,8 @@ impl Peripheral for Rc<RefCell<Pwm>> {
                         pwm.channels[i].disable();
                         stop_channel(i, ctx.clock.clone());
                     }
+
+                    pwm.update_gpio(ctx.gpio.clone(), i);
                 }
             }
             INTR => {

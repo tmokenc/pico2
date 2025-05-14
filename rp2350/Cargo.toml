@@ -2,7 +2,6 @@
 name = "rp2350"
 version = "0.1.0"
 edition = "2024"
-author = "Nguyen Le Duy"
 
 [dependencies]
 num-traits = "0.2"

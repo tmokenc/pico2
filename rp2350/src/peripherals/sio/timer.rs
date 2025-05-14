@@ -58,19 +58,27 @@ pub fn update_timer_ctrl(
     if extract_bit(ctrl, 0) == 0 {
         ctx.clock.cancel(EventType::RiscVTimer);
     } else {
-        schedule_timer(timer_ref.clone(), ctx.clock.clone(), ctx.interrupts.clone());
+        start_timer(timer_ref.clone(), ctx.clock.clone(), ctx.interrupts.clone());
     }
 
     // Reconfigurated speed => reschedule timer
     // 1 = full speed
     // 0 = 1 per microsecond
     if extract_bit(ctrl, 1) != extract_bit(last_ctrl, 1) {
-        ctx.clock.cancel(EventType::RiscVTimer);
-        schedule_timer(timer_ref, ctx.clock.clone(), ctx.interrupts.clone());
+        reschedule_timer(timer_ref, ctx.clock.clone(), ctx.interrupts.clone());
     }
 }
 
-pub fn schedule_timer(
+pub fn reschedule_timer(
+    timer_ref: Rc<RefCell<RiscVPlatformTimer>>,
+    clock: Rc<Clock>,
+    interrupts: Rc<RefCell<Interrupts>>,
+) {
+    clock.cancel(EventType::RiscVTimer);
+    start_timer(timer_ref, clock, interrupts);
+}
+
+pub fn start_timer(
     timer: Rc<RefCell<RiscVPlatformTimer>>,
     clock: Rc<Clock>,
     interrupt: Rc<RefCell<Interrupts>>,
@@ -91,6 +99,6 @@ pub fn schedule_timer(
             timer.update_interrupt(interrupt.clone());
         }
 
-        schedule_timer(timer, clock_ref, interrupt_ref);
+        start_timer(timer, clock_ref, interrupt_ref);
     });
 }

@@ -106,8 +106,8 @@ impl Default for Csrs {
             minstret: 0,
             mstatus: MSTATUS_MIE,
             mie: 0,
-            mtvec: 0x20000324,
-            // mtvec: 0x00001fff << 2, // 0x20000324
+            mtvec: 0x20000324, // unhandled interrupt
+            // mtvec: 0x00001fff << 2,
             mcounteren: 0,
             mcountinhibit: 5,
             mepc: 0,

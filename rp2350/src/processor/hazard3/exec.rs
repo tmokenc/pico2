@@ -1450,7 +1450,6 @@ fn exec_custom_instruction(code: u32, ctx: &mut ExecContext) {
 
 pub(super) fn exec_instruction(code: u32, ctx: &mut ExecContext<'_>) {
     if code & 0b11 == 0b11 {
-        log::info!("Normal instruction: {:#x}", code);
         ctx.set_next_pc_offset(4);
         match code & OPCODE_MASK {
             OPCODE_JAL => {
@@ -1518,7 +1517,6 @@ pub(super) fn exec_instruction(code: u32, ctx: &mut ExecContext<'_>) {
             _ => ctx.raise_exception(Exception::IllegalInstruction),
         }
     } else {
-        log::info!("Compressed instruction: {:#x}", code as u16);
         ctx.set_next_pc_offset(2);
         exec_compressed_instruction(code as u16, ctx);
     }

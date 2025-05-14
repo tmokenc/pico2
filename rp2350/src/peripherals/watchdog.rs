@@ -44,11 +44,11 @@ impl Default for WatchDog {
             timer: 0,
         };
 
-        let entry = 0x1000_0000;
+        let entry = 0x1000_0086;
 
         res.scratch[4] = 0xb007c0d3;
         res.scratch[5] = 0x4ff83f2d ^ entry;
-        res.scratch[6] = 0x20000000;
+        res.scratch[6] = 0x20081f50;
         res.scratch[7] = entry;
 
         res
@@ -73,7 +73,7 @@ impl WatchDog {
 
 impl Peripheral for WatchDog {
     fn read(&self, address: u16, _ctx: &PeripheralAccessContext) -> PeripheralResult<u32> {
-        log::warn!("Watchdog read from {:#x}", address);
+        log::error!("Watchdog read from {:#x}", address);
 
         let value = match address {
             CTRL => {
@@ -103,6 +103,7 @@ impl Peripheral for WatchDog {
         value: u32,
         _ctx: &PeripheralAccessContext,
     ) -> PeripheralResult<()> {
+        log::error!("Watchdog write to {:#x} with value {:#x}", address, value);
         match address {
             CTRL => {
                 if extract_bit(value, 31) != 0 {

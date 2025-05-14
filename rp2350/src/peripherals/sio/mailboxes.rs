@@ -9,9 +9,9 @@ use crate::utils::Fifo;
 
 #[derive(Default)]
 pub struct Mailboxes {
-    data: [Fifo<u32, 8>; 2],
-    roe: [bool; 2], // (Sticky) Read On Empty Error
-    wof: [bool; 2], // (Sticky) Write On Full Error
+    pub data: [Fifo<u32, 8>; 2],
+    pub roe: [bool; 2], // (Sticky) Read On Empty Error
+    pub wof: [bool; 2], // (Sticky) Write On Full Error
 }
 
 impl Mailboxes {

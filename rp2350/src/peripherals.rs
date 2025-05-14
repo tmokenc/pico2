@@ -24,6 +24,7 @@ pub mod pwm;
 pub mod reset;
 pub mod sha256;
 pub mod sio;
+// pub mod spi;
 pub mod ticks;
 pub mod timer;
 pub mod trng;
@@ -150,6 +151,12 @@ impl Peripherals {
             Rc::clone(&result.interrupts),
         );
 
+        sio::timer::start_timer(
+            result.sio.timer.clone(),
+            Rc::clone(&result.clock),
+            Rc::clone(&result.interrupts),
+        );
+
         result
     }
 
@@ -196,6 +203,12 @@ impl Peripherals {
 
         timer::reschedule_timer_tick(
             self.timer1.clone(),
+            self.clock.clone(),
+            self.interrupts.clone(),
+        );
+
+        sio::timer::reschedule_timer(
+            self.sio.timer.clone(),
             self.clock.clone(),
             self.interrupts.clone(),
         );
