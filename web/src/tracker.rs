@@ -1,3 +1,4 @@
+use rp2350::common::{DataSize, Requestor};
 /**
  * @file tracker.rs
  * @author Nguyen Le Duy
@@ -39,6 +40,18 @@ pub struct UartTracker {
     pub max_buffer_size: usize,
 }
 
+pub struct SpiTracker {
+    pub tx: VecDeque<u8>,
+    pub rx: VecDeque<u16>,
+    pub max_buffer_size: usize,
+}
+
+pub struct I2cTracker {
+    pub tx: VecDeque<u8>,
+    pub rx: VecDeque<u16>,
+    pub max_buffer_size: usize,
+}
+
 impl Default for UartTracker {
     fn default() -> Self {
         Self {
@@ -49,11 +62,62 @@ impl Default for UartTracker {
     }
 }
 
+impl Default for SpiTracker {
+    fn default() -> Self {
+        Self {
+            tx: VecDeque::new(),
+            rx: VecDeque::new(),
+            max_buffer_size: 4096, // Default size to 4096 bytes
+        }
+    }
+}
+
+impl Default for I2cTracker {
+    fn default() -> Self {
+        Self {
+            tx: VecDeque::new(),
+            rx: VecDeque::new(),
+            max_buffer_size: 4096, // Default size to 4096 bytes
+        }
+    }
+}
+
+pub enum BusEvent {
+    Read {
+        requestor: Requestor,
+        address: u32,
+        size: DataSize,
+    },
+    Write {
+        requestor: Requestor,
+        address: u32,
+        value: u32,
+        size: DataSize,
+    },
+}
+
+pub struct BusTracker {
+    pub events: VecDeque<BusEvent>,
+    pub max_buffer_size: usize,
+}
+
+impl Default for BusTracker {
+    fn default() -> Self {
+        Self {
+            events: VecDeque::new(),
+            max_buffer_size: 100,
+        }
+    }
+}
+
 pub struct TrackerInner {
     pub processor: [ProcessorTracker; 2],
     pub uart: [UartTracker; 2],
+    pub spi: [SpiTracker; 2],
+    pub i2c: [I2cTracker; 2],
     pub last_generated_trng: Option<u32>,
     pub nof_instruction_log: usize,
+    pub bus: BusTracker,
 }
 
 impl Default for TrackerInner {
@@ -61,6 +125,9 @@ impl Default for TrackerInner {
         Self {
             processor: Default::default(),
             uart: Default::default(),
+            spi: Default::default(),
+            i2c: Default::default(),
+            bus: Default::default(),
             last_generated_trng: None,
             nof_instruction_log: 50,
         }
@@ -111,6 +178,36 @@ impl Inspector for Tracker {
             // reset the tracker
             InspectionEvent::FlashedBinary => {
                 core::mem::take(&mut *inner);
+            }
+
+            InspectionEvent::BusLoad {
+                requestor,
+                address,
+                size,
+            } => {
+                let bus = &mut inner.bus;
+                let event = BusEvent::Read {
+                    requestor,
+                    address,
+                    size,
+                };
+                push_to_buffer(&mut bus.events, event, bus.max_buffer_size);
+            }
+
+            InspectionEvent::BusStore {
+                requestor,
+                address,
+                value,
+                size,
+            } => {
+                let bus = &mut inner.bus;
+                let event = BusEvent::Write {
+                    requestor,
+                    address,
+                    value,
+                    size,
+                };
+                push_to_buffer(&mut bus.events, event, bus.max_buffer_size);
             }
 
             _ => {

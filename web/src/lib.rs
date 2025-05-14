@@ -6,10 +6,10 @@
  */
 mod api;
 mod app;
+mod notify;
+mod simulator;
 mod tracker;
 mod widgets;
 
 pub use app::SimulatorApp;
 pub use tracker::Tracker;
-
-mod simulator;

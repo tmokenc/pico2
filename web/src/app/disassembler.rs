@@ -2,7 +2,7 @@
  * @file app/disassembler.rs
  * @author Nguyen Le Duy
  * @date 23/04/2025
- * @brief View window for the WatchDog peripheral
+ * @brief Disassembler view window
  */
 
 const ARM_BOOTROM_DISASSEMBLY: &str = include_str!("../../assets/arm-bootrom.dis");
@@ -48,21 +48,20 @@ impl Default for Disassembler {
             stick: StickOption::Core0,
         };
 
-        res.add_file(ARM_BOOTROM_DISASSEMBLY);
-        res.add_file(RISCV_BOOTROM_DISASSEMBLY);
+        res.codes
+            .extend(ARM_BOOTROM_DISASSEMBLY.lines().map(String::from));
+        res.codes
+            .extend(RISCV_BOOTROM_DISASSEMBLY.lines().map(String::from));
         res
     }
 }
 
 impl Disassembler {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn add_file(&mut self, file: &str) {
+    pub fn update_file(&mut self, file: &str) {
+        let Self { codes, .. } = Self::default();
+        self.codes = codes;
         self.codes.extend(file.lines().map(String::from));
         self.update_pc_to_line_map();
-        self.clear_breakpoints();
     }
 
     pub fn add_breakpoint(&mut self, addr: u32) {
@@ -146,6 +145,25 @@ impl Rp2350Component for Disassembler {
                 });
                 ui.end_row();
 
+
+                ui.label("Jump to PC");
+
+                ui.horizontal(|ui| {
+                    if ui.button("Core 0").clicked() {
+                        if let Some(&line_index) = self.pc_to_line_map.get(&pc_core0) {
+                            scroll_to = Some(line_index);
+                        }
+                    }
+
+                    if ui.button("Core 1").clicked() {
+                        if let Some(&line_index) = self.pc_to_line_map.get(&pc_core1) {
+                            scroll_to = Some(line_index);
+                        }
+                    }
+                });
+
+                ui.end_row();
+
                 ui.label("Stick to");
                 ui.horizontal(|ui| {
                     ui.radio_value(&mut self.stick, StickOption::Core0, " Core 0 ");
@@ -164,6 +182,11 @@ impl Rp2350Component for Disassembler {
                     ui.label(RichText::new("BOTH").monospace().background_color(faded_color(COLOR_BOTH)));
                 });
                 ui.end_row();
+
+                if ui.button("Clear Breakpoints").clicked() {
+                    self.clear_breakpoints();
+                }
+
             });
 
         match self.stick {

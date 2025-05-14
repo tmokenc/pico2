@@ -1,19 +1,17 @@
-use crate::app::disassembler::Disassembler;
 /**
  * @file simulator.rs
  * @author Nguyen Le Duy
  * @date 04/05/2025
  * @brief Handling of simulator tasks
  */
+use crate::app::disassembler::Disassembler;
 use api_types::{CompilationResponse, Language};
 use egui::Context;
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use futures::stream::StreamExt;
-use futures::FutureExt;
 use rp2350::simulator::Pico2;
 use std::cell::RefCell;
 use std::rc::Rc;
-use web_time as time;
 
 type ShoulSkipBootrom = bool;
 
@@ -31,34 +29,34 @@ pub fn pick_file_into_pico2(
     skip_bootrom: ShoulSkipBootrom,
 ) {
     let file_picker = rfd::AsyncFileDialog::new();
-    log::info!("Opening file picker");
 
     wasm_bindgen_futures::spawn_local(async move {
-        log::info!("Waiting for file picker");
         let Some(file) = file_picker.pick_file().await else {
-            log::warn!("No file selected");
+            crate::notify::warning("No file selected");
             return;
         };
 
         let file_name = file.file_name();
-        log::info!("Selected file: {}", file_name);
+        crate::notify::info(format!("Selected file: {}", file_name));
 
         let mut pico2 = pico2.borrow_mut();
 
         if file_name.ends_with(".bin") {
-            log::info!("Flashing bin file");
             let file = file.read().await;
             if let Err(why) = pico2.flash_bin(&file) {
-                log::error!("Failed to flash bin file: {}", why);
+                crate::notify::error(format!("Failed to flash bin file: {}", why));
+            } else {
+                crate::notify::success("Flashed bin file successfully");
             }
         } else if file_name.ends_with(".uf2") {
-            log::info!("Flashing uf2 file");
             let file = file.read().await;
             if let Err(why) = pico2.flash_uf2(&file) {
-                log::error!("Failed to flash uf2 file: {}", why);
+                crate::notify::error(format!("Failed to flash uf2 file: {}", why));
+            } else {
+                crate::notify::success("Flashed uf2 file successfully");
             }
         } else {
-            log::error!("Unsupported file type: {}", file_name);
+            crate::notify::error(format!("Unsupported file type: {}", file_name));
             return;
         }
 
@@ -119,16 +117,14 @@ async fn flash_code(
     let res = match compile_source_code(lang, code).await {
         Ok(res) => res,
         Err(err) => {
-            log::error!("Failed to compile code: {}", err);
-            // TODO show error message in the UI
+            crate::notify::error(format!("Failed to compile code: {}", err));
             return;
         }
     };
 
     let mut mcu = pico2.borrow_mut();
     if let Err(why) = mcu.flash_uf2(&res.uf2) {
-        log::error!("Failed to flash uf2 file: {}", why);
-        // TODO show error message in the UI
+        crate::notify::error(format!("Failed to flash uf2 file: {}", why));
         return;
     }
 
@@ -136,9 +132,12 @@ async fn flash_code(
         mcu.skip_bootrom();
     }
 
-    disassembler.borrow_mut().add_file(&res.disassembler);
+    {
+        let mut disassembler = disassembler.borrow_mut();
+        disassembler.update_file(&res.disassembler);
+    }
 
-    // TODO add a message to the UI
+    crate::notify::success("Code flashed successfully");
 }
 
 pub fn run_pico2_sim(
@@ -150,12 +149,10 @@ pub fn run_pico2_sim(
     let (tx, mut rx): (Sender<TaskCommand>, Receiver<TaskCommand>) = channel(4);
 
     wasm_bindgen_futures::spawn_local(async move {
-        let mut now;
         let mut request_repaint = 5;
 
         loop {
             if *is_running.borrow() {
-                now = time::Instant::now();
                 request_repaint -= 1;
 
                 {
@@ -164,7 +161,7 @@ pub fn run_pico2_sim(
                     let pc0 = pico2.processor[0].get_pc();
                     let pc1 = pico2.processor[1].get_pc();
                     drop(pico2);
-                    let mut disassembler = disassembler.borrow();
+                    let disassembler = disassembler.borrow();
                     if disassembler.has_breakpoint(&pc0) || disassembler.has_breakpoint(&pc1) {
                         drop(disassembler);
                         *is_running.borrow_mut() = false;
@@ -172,41 +169,25 @@ pub fn run_pico2_sim(
                 }
 
                 if request_repaint == 0 {
-                    // Request repaint every 5 steps in running mode
-                    request_repaint = 5;
+                    // Request repaint every 9876 steps in running mode
+                    request_repaint = 9876;
                     ctx.request_repaint();
+                    // try to notify the async runtime to avoid blocking
+                    yield_now().await;
                 }
 
-                let elapsed = now.elapsed();
-                let target = time::Duration::from_secs_f64(1.0 / 150.0e6);
-
-                let sleep_dur = if elapsed < target {
-                    target - elapsed
-                } else {
-                    time::Duration::ZERO
-                };
-
-                let timeout_future = gloo::timers::future::sleep(sleep_dur).fuse();
-                let recv_future = rx.next().fuse();
-
-                futures::pin_mut!(timeout_future, recv_future);
-
-                futures::select_biased! {
-                    _ = timeout_future => {},
-                    cmd = recv_future => {
-                        match cmd {
-                            Some(TaskCommand::Stop) => {
-                                *is_running.borrow_mut() = false;
-                            }
-                            Some(TaskCommand::Pause) => *is_running.borrow_mut() = false,
-                            Some(TaskCommand::FlashCode(language, code, skip_bootrom)) => {
-                                *is_running.borrow_mut() = false;
-                                flash_code(pico2.clone(), language, &code, skip_bootrom, &disassembler).await;
-                            }
-                            _ => {}
-                        }
+                match rx.try_next() {
+                    Ok(Some(TaskCommand::Stop)) => {
+                        *is_running.borrow_mut() = false;
                     }
-                };
+                    Ok(Some(TaskCommand::Pause)) => *is_running.borrow_mut() = false,
+                    Ok(Some(TaskCommand::FlashCode(language, code, skip_bootrom))) => {
+                        *is_running.borrow_mut() = false;
+                        flash_code(pico2.clone(), language, &code, skip_bootrom, &disassembler)
+                            .await;
+                    }
+                    _ => {}
+                }
             } else {
                 match rx.next().await {
                     Some(TaskCommand::Run) => *is_running.borrow_mut() = true,
@@ -225,3 +206,36 @@ pub fn run_pico2_sim(
 
     tx
 }
+
+/// A future that yields immediately when polled.
+/// This is useful for yielding control back to the executor
+/// without blocking the current task.
+/// Taken from embassy-futures
+/// https://github.com/embassy-rs/embassy/blob/f9f20ae2174cb26d0f8926207d179041cfec2d2e/embassy-futures/src/yield_now.rs#L29-L31
+// fn yield_now() -> impl Future<Output = ()> {
+//     YieldNowFuture { yielded: false }
+// }
+fn yield_now() -> impl Future<Output = ()> {
+    gloo::timers::future::TimeoutFuture::new(0)
+}
+
+// #[must_use = "futures do nothing unless you `.await` or poll them"]
+// struct YieldNowFuture {
+//     yielded: bool,
+// }
+//
+// use std::pin::Pin;
+// use std::task::Poll;
+//
+// impl Future for YieldNowFuture {
+//     type Output = ();
+//     fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+//         if self.yielded {
+//             Poll::Ready(())
+//         } else {
+//             self.yielded = true;
+//             cx.waker().wake_by_ref();
+//             Poll::Pending
+//         }
+//     }
+// }

@@ -6,12 +6,17 @@
  */
 mod boot_ram;
 mod boot_rom;
+mod bus;
 pub(crate) mod disassembler;
 mod editor;
 mod field;
 mod flash;
+mod i2c;
 mod processor_core;
+mod pwm;
 mod sha256;
+mod sio;
+mod spi;
 mod sram;
 mod timer;
 mod trng;
@@ -53,6 +58,7 @@ pub enum Window {
     Editor,
     Field,
     Disassembler,
+    Bus,
 
     // Processor Cores
     Core0,
@@ -78,6 +84,7 @@ pub enum Window {
     I2c1,
     Pwm,
     Dma,
+    Sio,
 }
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
@@ -97,6 +104,7 @@ pub struct App {
     example: usize,
 
     editor: editor::CodeEditor,
+    bus: bus::Bus,
     disassembler: Rc<RefCell<disassembler::Disassembler>>,
     // components
     core0: processor_core::ProcessorCore<0>,
@@ -113,8 +121,14 @@ pub struct App {
     trng: trng::Trng,
     uart0: uart::Uart<0>,
     uart1: uart::Uart<1>,
+    spi0: spi::Spi<0>,
+    spi1: spi::Spi<1>,
+    i2c0: i2c::I2c<0>,
+    i2c1: i2c::I2c<1>,
     timer0: timer::Timer<0>,
     timer1: timer::Timer<1>,
+    pwm: pwm::Pwm,
+    sio: sio::Sio,
 }
 
 impl TabViewer for App {
@@ -125,8 +139,9 @@ impl TabViewer for App {
             Window::Editor => "Editor",
             Window::Field => "Field",
             Window::Disassembler => "Disassembler",
-            Window::Core0 => "Core 0",
-            Window::Core1 => "Core 1",
+            Window::Core0 => "Processor Core 0",
+            Window::Core1 => "Processor Core 1",
+            Window::Bus => "Bus",
             Window::BootRom => "Boot ROM",
             Window::Sram => "SRAM",
             Window::BootRam => "Boot RAM",
@@ -144,6 +159,7 @@ impl TabViewer for App {
             Window::Timer1 => "Timer 1",
             Window::Pwm => "PWM",
             Window::Dma => "DMA",
+            Window::Sio => "SIO",
         };
 
         title.into()
@@ -188,6 +204,7 @@ impl TabViewer for App {
                             disassembler.ui(ui, rp2350);
                         }
                     }
+                    Window::Bus => self.bus.ui_with_tracker(ui, rp2350, self.tracker.clone()),
                     Window::Field => self.field.ui(ui, rp2350),
                     Window::Core0 => self.core0.ui_with_tracker(ui, rp2350, self.tracker.clone()),
                     Window::Core1 => self.core1.ui_with_tracker(ui, rp2350, self.tracker.clone()),
@@ -200,28 +217,14 @@ impl TabViewer for App {
                     Window::TRNG => self.trng.ui_with_tracker(ui, rp2350, self.tracker.clone()),
                     Window::Uart0 => self.uart0.ui_with_tracker(ui, rp2350, self.tracker.clone()),
                     Window::Uart1 => self.uart1.ui_with_tracker(ui, rp2350, self.tracker.clone()),
+                    Window::Spi0 => self.spi0.ui_with_tracker(ui, rp2350, self.tracker.clone()),
+                    Window::Spi1 => self.spi1.ui_with_tracker(ui, rp2350, self.tracker.clone()),
                     Window::Timer0 => self.timer0.ui(ui, rp2350),
                     Window::Timer1 => self.timer1.ui(ui, rp2350),
-                    Window::Spi0 => {
-                        ui.heading("SPI");
-                        ui.label("todo");
-                    }
-                    Window::I2c0 => {
-                        ui.heading("I2C");
-                        ui.label("todo");
-                    }
-                    Window::Spi1 => {
-                        ui.heading("SPI");
-                        ui.label("todo");
-                    }
-                    Window::I2c1 => {
-                        ui.heading("I2C");
-                        ui.label("todo");
-                    }
-                    Window::Pwm => {
-                        ui.heading("PWM");
-                        ui.label("todo");
-                    }
+                    Window::Pwm => self.pwm.ui(ui, rp2350),
+                    Window::Sio => self.sio.ui(ui, rp2350),
+                    Window::I2c0 => self.i2c0.ui_with_tracker(ui, rp2350, self.tracker.clone()),
+                    Window::I2c1 => self.i2c1.ui_with_tracker(ui, rp2350, self.tracker.clone()),
                     Window::Dma => {
                         ui.heading("DMA");
                         ui.label("todo");
@@ -239,6 +242,7 @@ impl Window {
             Window::Disassembler => "Disassembler",
             Window::Core0 => "Core 0",
             Window::Core1 => "Core 1",
+            Window::Bus => "Bus",
             Window::BootRom => "Boot ROM",
             Window::Sram => "SRAM",
             Window::BootRam => "Boot RAM",
@@ -256,6 +260,7 @@ impl Window {
             Window::Timer1 => "Timer 1",
             Window::Pwm => "PWM",
             Window::Dma => "DMA",
+            Window::Sio => "SIO",
         }
     }
 }
@@ -469,8 +474,13 @@ impl SimulatorApp {
                 self.side_panel_collapsing(
                     ui,
                     egui::include_image!("../assets/processor.svg"),
-                    "Processor Core",
-                    &[Window::Core0, Window::Core1, Window::Disassembler],
+                    "System",
+                    &[
+                        Window::Core0,
+                        Window::Core1,
+                        Window::Disassembler,
+                        Window::Bus,
+                    ],
                 );
 
                 self.side_panel_collapsing(
@@ -499,6 +509,7 @@ impl SimulatorApp {
                         Window::Spi1,
                         Window::TRNG,
                         Window::Dma,
+                        Window::Sio,
                         Window::Timer0,
                         Window::Timer1,
                         Window::WatchDog,
@@ -593,5 +604,8 @@ impl eframe::App for SimulatorApp {
             .show(ctx, |ui| {
                 DockArea::new(&mut self.dock_state).show_inside(ui, &mut self.app)
             });
+
+        // Show toasts
+        crate::notify::get_toasts().show(ctx);
     }
 }
