@@ -30,8 +30,8 @@ egui_extras = { version = "0.31", features = ["serde", "svg", "image", "all_load
 image = { version = "*", features = ["webp"] }
 egui_alignments = {git = "https://github.com/a-littlebit/egui_alignments.git", rev = "91c1f4eb2f18ad894d025789d0da8cfb78ccde2e"}
 futures = "0.3"
-web-time = "1"
 gloo = {version = "0.11", features = ["futures", "timers"]}
+egui-toast = "0.17"
 ehttp = { version = "0.5", features = ["json"] }
 rfd = "0.15"
 api_types = { path = "../api_types" }
