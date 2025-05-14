@@ -23,6 +23,9 @@ pub enum CompilationResponse {
         /// uf2 binary data in base64 format.
         #[serde(with = "serde_bytes")]
         uf2: Vec<u8>,
+
+        /// Disassembly data
+        disassembler: String,
     },
     /// An error occurred during the compilation process.
     Error { message: String },

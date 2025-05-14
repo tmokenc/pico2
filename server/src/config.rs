@@ -12,7 +12,7 @@ pub struct ServerConfig {
     pub ip: String,
     pub static_dir: String,
     pub data_dir: String,
-    pub sdk_path: Option<String>,
+    pub pico_sdk: Option<String>,
 }
 
 impl Default for ServerConfig {
@@ -22,7 +22,7 @@ impl Default for ServerConfig {
             ip: String::from("127.0.0.1"),
             static_dir: String::from("./static"),
             data_dir: String::from("./data"),
-            sdk_path: None,
+            pico_sdk: None,
         }
     }
 }
@@ -32,6 +32,7 @@ impl ServerConfig {
         config::Config::builder()
             .add_source(config::Config::try_from(&ServerConfig::default())?)
             .add_source(config::File::with_name(path).required(false))
+            .add_source(config::Environment::with_prefix("SERVER"))
             .build()?
             .try_deserialize()
     }

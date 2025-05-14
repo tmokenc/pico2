@@ -3,6 +3,7 @@ name = "server"
 version = "0.1.0"
 edition = "2021"
 
+
 [dependencies]
 warp = "0.3"
 tokio = { version = "1", features = ["full"] }
@@ -15,3 +16,4 @@ thiserror = "2"
 anyhow = "1"
 log = "0.4"
 api_types = { path = "../api_types" }
+pretty_env_logger = "0.5"
